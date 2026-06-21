@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="id" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Portal Manajemen RW 26 Pengasinan Rawalumbu">
+  <title>Portal RW 26 | Pengasinan Rawalumbu</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <script src="config.js"></script>
+  <script>
+    window.RW26_SESSION = JSON.parse(localStorage.getItem('rw26_session') || sessionStorage.getItem('rw26_session') || 'null');
+    if (!window.RW26_SESSION || !window.RW26_SESSION.token || window.RW26_SESSION.expiresAt < Date.now()) location.replace('login.html');
+  </script>
+  <style>
+    :root {
+      --rw-primary: #0a6c50;
+      --rw-primary-dark: #075541;
+      --rw-accent: #e9b949;
+      --rw-bg: #f4f7f6;
+      --rw-sidebar: #063d31;
+      --rw-muted: #6c7b76;
+      --rw-border: #e4ebe8;
+      --sidebar-width: 278px;
+    }
+    [data-bs-theme="dark"] {
+      --rw-bg: #111a18;
+      --rw-border: #26332f;
+      --rw-muted: #9caaa5;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: "DM Sans", sans-serif; background: var(--rw-bg); color: var(--bs-body-color); }
+    .sidebar {
+      position: fixed; inset: 0 auto 0 0; z-index: 1045; width: var(--sidebar-width);
+      padding: 24px 16px; color: #fff; overflow-y: auto;
+      background: linear-gradient(180deg, #075541 0%, var(--rw-sidebar) 65%, #052f27 100%);
+      transition: transform .25s ease;
+    }
+    .brand-mark { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; color: var(--rw-sidebar); background: var(--rw-accent); font-size: 1.35rem; }
+    .brand-subtitle { color: rgba(255,255,255,.62); font-size: .73rem; letter-spacing: .08em; }
+    .sidebar-label { margin: 26px 12px 9px; color: rgba(255,255,255,.46); font-size: .67rem; font-weight: 700; letter-spacing: .12em; }
+    .sidebar .nav-link { display: flex; align-items: center; gap: 12px; margin: 3px 0; padding: 11px 13px; border-radius: 12px; color: rgba(255,255,255,.72); font-size: .89rem; transition: .2s ease; }
+    .sidebar .nav-link i { font-size: 1.05rem; }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active { color: #fff; background: rgba(255,255,255,.12); transform: translateX(2px); }
+    .sidebar .nav-link.active { box-shadow: inset 3px 0 var(--rw-accent); }
+    .sidebar-footer { padding: 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: rgba(255,255,255,.07); }
+    .main-content { min-height: 100vh; margin-left: var(--sidebar-width); }
+    .topbar { position: sticky; top: 0; z-index: 1030; padding: 14px 28px; border-bottom: 1px solid var(--rw-border); background: color-mix(in srgb, var(--bs-body-bg) 90%, transparent); backdrop-filter: blur(14px); }
+    .search-box { width: min(360px, 36vw); }
+    .search-box .input-group-text, .search-box .form-control { border: 0; background: var(--rw-bg); }
+    .avatar { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; color: white; background: linear-gradient(135deg, var(--rw-primary), #159a74); font-weight: 700; }
+    .page { display: none; padding: 28px; animation: fadeIn .25s ease; }
+    .page.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } }
+    .eyebrow { color: var(--rw-primary); font-weight: 700; font-size: .72rem; letter-spacing: .1em; }
+    .page-title { font-weight: 700; letter-spacing: -.025em; }
+    .card { border-color: var(--rw-border); border-radius: 18px; box-shadow: 0 8px 28px rgba(28,53,45,.05); }
+    .stat-card { position: relative; overflow: hidden; }
+    .stat-card::after { content:""; position:absolute; width:90px; height:90px; right:-35px; top:-35px; border-radius:50%; background: var(--stat-color); opacity:.08; }
+    .stat-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; color: var(--stat-color); background: color-mix(in srgb, var(--stat-color) 12%, transparent); font-size: 1.25rem; }
+    .hero-card { min-height: 232px; padding: 30px; color: white; border: 0; background: linear-gradient(115deg, rgba(5,63,48,.96), rgba(10,108,80,.86)), url('https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?auto=format&fit=crop&w=1400&q=70') center/cover; }
+    .hero-card .badge { color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); }
+    .announcement { border-left: 3px solid var(--rw-primary); }
+    .announcement.warning { border-left-color: #e9a23b; }
+    .mini-date { width: 48px; min-width: 48px; padding: 6px 0; border-radius: 12px; text-align: center; color: var(--rw-primary); background: color-mix(in srgb, var(--rw-primary) 10%, transparent); }
+    .mini-date strong { display: block; font-size: 1.1rem; line-height: 1; }
+    .table > :not(caption) > * > * { padding: .9rem .75rem; border-bottom-color: var(--rw-border); vertical-align: middle; }
+    .table thead th { color: var(--rw-muted); font-size: .7rem; letter-spacing: .06em; font-weight: 700; text-transform: uppercase; }
+    .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }
+    .facility-icon { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; color: var(--rw-primary); background: color-mix(in srgb, var(--rw-primary) 10%, transparent); font-size: 1.4rem; }
+    .himbauan-slide { min-height: 520px; overflow: hidden; }
+    .himbauan-slide img { width: 100%; height: 100%; object-fit: cover; background: #063d31; }
+    .himbauan-empty { min-height: 320px; display: grid; place-items: center; border: 1px dashed var(--rw-border); border-radius: 18px; background: var(--bs-body-bg); }
+    .org-card { border-top: 4px solid var(--rw-primary); }
+    .btn-primary { --bs-btn-bg: var(--rw-primary); --bs-btn-border-color: var(--rw-primary); --bs-btn-hover-bg: var(--rw-primary-dark); --bs-btn-hover-border-color: var(--rw-primary-dark); }
+    .badge-soft-success { color: #087255; background: #dcf6ed; }
+    .badge-soft-warning { color: #8b5a08; background: #fff0ce; }
+    .badge-soft-danger { color: #a23a3a; background: #fde5e5; }
+    [data-bs-theme="dark"] .badge-soft-success { color:#6ce1bc; background:#173d32; }
+    [data-bs-theme="dark"] .badge-soft-warning { color:#f1c66b; background:#493a1d; }
+    [data-bs-theme="dark"] .badge-soft-danger { color:#f19b9b; background:#4a2929; }
+    .mobile-overlay { display: none; position: fixed; inset: 0; z-index: 1040; background: rgba(0,0,0,.45); }
+    .activity-line { position: relative; padding-left: 25px; }
+    .activity-line::before { content:""; position:absolute; left:6px; top:7px; bottom:-18px; width:2px; background:var(--rw-border); }
+    .activity-line:last-child::before { display:none; }
+    .activity-line::after { content:""; position:absolute; left:1px; top:6px; width:12px; height:12px; border-radius:50%; border:3px solid var(--bs-body-bg); background:var(--rw-primary); box-shadow:0 0 0 1px var(--rw-primary); }
+    @media (max-width: 991.98px) {
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.show { transform: translateX(0); }
+      .mobile-overlay.show { display:block; }
+      .main-content { margin-left: 0; }
+      .topbar { padding: 12px 16px; }
+      .page { padding: 20px 16px; }
+      .search-box { display:none; }
+    }
+    @media (max-width: 575.98px) {
+      .hero-card { padding: 22px; min-height: 250px; }
+      .topbar .user-meta { display:none; }
+      .page-title { font-size: 1.55rem; }
+      .card-body { padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mobile-overlay" id="overlay"></div>
+  <aside class="sidebar d-flex flex-column" id="sidebar">
+    <div class="d-flex align-items-center gap-3 px-2">
+      <div class="brand-mark"><i class="bi bi-buildings-fill"></i></div>
+      <div><div class="fw-bold fs-5">RW 26</div><div class="brand-subtitle">PENGASINAN · RAWALUMBU</div></div>
+      <button class="btn btn-sm text-white ms-auto d-lg-none" id="closeSidebar"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="sidebar-label">MENU UTAMA</div>
+    <nav class="nav flex-column">
+      <a class="nav-link active" href="#dashboard" data-page="dashboard"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+      <a class="nav-link" href="#himbauan" data-page="himbauan"><i class="bi bi-megaphone-fill"></i> Himbauan</a>
+      <a class="nav-link" href="#pengumuman" data-page="pengumuman"><i class="bi bi-pin-angle-fill"></i> Papan Pengumuman <span class="badge rounded-pill text-bg-warning ms-auto">3</span></a>
+      <a class="nav-link" href="#berita" data-page="berita"><i class="bi bi-newspaper"></i> Berita & Informasi</a>
+      <a class="nav-link" href="#fasilitas" data-page="fasilitas"><i class="bi bi-houses-fill"></i> Fasilitas Umum</a>
+      <a class="nav-link" href="#organisasi" data-page="organisasi"><i class="bi bi-diagram-3-fill"></i> Struktur Organisasi</a>
+    </nav>
+    <div class="sidebar-label">ADMINISTRASI</div>
+    <nav class="nav flex-column">
+      <a class="nav-link" href="#users" data-page="users"><i class="bi bi-people-fill"></i> Manajemen User</a>
+      <a class="nav-link" href="#pengaturan" data-page="pengaturan"><i class="bi bi-gear-fill"></i> Pengaturan</a>
+    </nav>
+    <div class="mt-auto pt-4">
+      <div class="sidebar-footer">
+        <div class="d-flex align-items-center gap-2 mb-2"><i class="bi bi-headset fs-5 text-warning"></i><strong class="small">Butuh bantuan?</strong></div>
+        <p class="small mb-2 text-white-50">Hubungi admin portal RW 26.</p>
+        <a href="mailto:admin@rw26.id" class="small text-white text-decoration-none">admin@rw26.id</a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar d-flex align-items-center gap-3">
+      <button class="btn btn-light border d-lg-none" id="openSidebar" aria-label="Buka menu"><i class="bi bi-list fs-5"></i></button>
+      <div class="input-group search-box">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="search" class="form-control" id="globalSearch" placeholder="Cari data portal...">
+      </div>
+      <div class="ms-auto d-flex align-items-center gap-2 gap-sm-3">
+        <button class="btn btn-light border rounded-circle" id="themeToggle" aria-label="Ubah tema"><i class="bi bi-moon-stars"></i></button>
+        <button class="btn btn-light border rounded-circle position-relative" aria-label="Notifikasi"><i class="bi bi-bell"></i><span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle"></span></button>
+        <div class="vr mx-1"></div>
+        <div class="text-end user-meta"><div class="small fw-bold" id="sessionName">Pengguna</div><div class="text-secondary" id="sessionRole" style="font-size:.7rem">Administrator</div></div>
+        <div class="avatar" id="sessionAvatar">RW</div>
+        <button class="btn btn-light border rounded-circle" id="logoutButton" aria-label="Keluar" title="Keluar"><i class="bi bi-box-arrow-right"></i></button>
+      </div>
+    </header>
+
+    <section class="page active" id="dashboard">
+      <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+        <div><div class="eyebrow mb-1">PORTAL MANAJEMEN</div><h1 class="page-title h3 mb-1">Selamat datang,Pak <span id="welcomeName">Pengguna</span> 👋</h1><p class="text-secondary mb-0">Berikut rangkuman aktivitas lingkungan RW 26 hari ini.</p></div>
+        <div class="small text-secondary"><i class="bi bi-calendar3 me-2"></i><span id="currentDate"></span></div>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#0a6c50"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-people-fill"></i></div><div><div class="text-secondary small">Total Warga</div><div class="h4 fw-bold mb-0">1.248</div><small class="text-success"><i class="bi bi-arrow-up-short"></i> 12 bulan ini</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#2f80ed"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-house-door-fill"></i></div><div><div class="text-secondary small">Kepala Keluarga</div><div class="h4 fw-bold mb-0">386</div><small class="text-secondary">8 RT aktif</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#e9a23b"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-megaphone-fill"></i></div><div><div class="text-secondary small">Pengumuman</div><div class="h4 fw-bold mb-0">8</div><small class="text-warning">3 terbaru</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#9b51e0"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-buildings-fill"></i></div><div><div class="text-secondary small">Fasilitas</div><div class="h4 fw-bold mb-0">14</div><small class="text-success">Semua terdata</small></div></div></div></div>
+      </div>
+      <div class="card hero-card mb-4">
+        <div class="row align-items-center h-100"><div class="col-lg-8"><span class="badge rounded-pill mb-3"><i class="bi bi-stars me-1"></i> Lingkungan Kita</span><h2 class="fw-bold mb-2">Bersama Wujudkan RW 26<br>yang Aman, Bersih & Harmonis</h2><p class="text-white-50 mb-4">Informasi dan pelayanan warga kini lebih mudah, cepat, dan transparan.</p><button class="btn btn-warning fw-semibold px-4" data-navigate="pengumuman">Lihat Pengumuman <i class="bi bi-arrow-right ms-2"></i></button></div></div>
+      </div>
+      <div class="row g-4">
+        <div class="col-xl-7"><div class="card h-100"><div class="card-header bg-transparent border-0 d-flex align-items-center pt-4 px-4"><div><h5 class="fw-bold mb-1">Pengumuman Terbaru</h5><small class="text-secondary">Informasi penting untuk warga</small></div><button class="btn btn-sm btn-outline-success ms-auto" data-navigate="pengumuman">Lihat semua</button></div><div class="card-body px-4" id="dashboardAnnouncements"></div></div></div>
+        <div class="col-xl-5"><div class="card h-100"><div class="card-header bg-transparent border-0 pt-4 px-4"><h5 class="fw-bold mb-1">Aktivitas Terkini</h5><small class="text-secondary">Pembaruan sistem terakhir</small></div><div class="card-body px-4">
+          <div class="activity-line mb-4"><div class="fw-semibold small">Data warga diperbarui</div><div class="text-secondary small">Admin menambahkan 4 data warga baru</div><small class="text-secondary">10 menit lalu</small></div>
+          <div class="activity-line mb-4"><div class="fw-semibold small">Berita baru diterbitkan</div><div class="text-secondary small">Kerja bakti serentak RW 26</div><small class="text-secondary">2 jam lalu</small></div>
+          <div class="activity-line"><div class="fw-semibold small">Fasilitas diperbarui</div><div class="text-secondary small">Jadwal Posyandu Melati</div><small class="text-secondary">Kemarin, 16:40</small></div>
+        </div></div></div>
+      </div>
+    </section>
+
+    <section class="page" id="himbauan"><div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4"><div><div class="eyebrow">SLIDE HIMBAUAN</div><h1 class="page-title h3">Himbauan Gambar</h1><p class="text-secondary mb-0">Himbauan ditampilkan sebagai slide gambar dari Google Drive.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshHimbauan"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#himbauanModal"><i class="bi bi-image-fill me-2"></i>Upload Gambar</button></div></div><div class="alert alert-danger d-none" id="himbauanError"></div><div id="himbauanSliderWrap" class="mb-4"></div><div class="card"><div class="card-header bg-transparent border-0 pt-4 px-4"><h5 class="fw-bold mb-1">Data Himbauan</h5><small class="text-secondary">Sesuai tabel: ID, Judul, Kategori, Gambar, Status.</small></div><div class="card-body"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>ID</th><th>Judul</th><th>Kategori</th><th>Gambar</th><th>Status</th><th class="text-end">Aksi</th></tr></thead><tbody id="himbauanTable"><tr><td colspan="6" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat slide himbauan...</td></tr></tbody></table></div></div></div></section>
+
+    <section class="page" id="pengumuman"><div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4"><div><div class="eyebrow">PUSAT INFORMASI</div><h1 class="page-title h3">Papan Pengumuman</h1><p class="text-secondary mb-0">Kelola pengumuman resmi untuk warga RW 26.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#entryModal" data-type="Pengumuman"><i class="bi bi-plus-lg me-2"></i>Tambah Pengumuman</button></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Judul</th><th>Kategori</th><th>Tanggal</th><th>Status</th><th class="text-end">Aksi</th></tr></thead><tbody id="announcementTable"></tbody></table></div></div></div></section>
+
+    <section class="page" id="berita"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">PUBLIKASI</div><h1 class="page-title h3">Berita & Informasi</h1><p class="text-secondary mb-0">Kabar terbaru seputar kegiatan dan lingkungan.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#entryModal" data-type="Berita"><i class="bi bi-plus-lg me-2"></i>Tulis Berita</button></div><div class="row g-4" id="newsGrid"></div></section>
+
+    <section class="page" id="fasilitas"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">ASET LINGKUNGAN</div><h1 class="page-title h3">Fasilitas Umum</h1><p class="text-secondary mb-0">Data fasilitas yang tersedia di wilayah RW 26.</p></div><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#entryModal" data-type="Fasilitas"><i class="bi bi-plus-lg me-2"></i>Tambah Fasilitas</button></div><div class="row g-3" id="facilityGrid"></div></section>
+
+    <section class="page" id="organisasi"><div class="mb-4"><div class="eyebrow">KEPENGURUSAN</div><h1 class="page-title h3">Struktur Organisasi</h1><p class="text-secondary">Susunan pengurus RW 26 periode 2024–2029.</p></div><div class="text-center mb-4"><div class="card org-card d-inline-block"><div class="card-body px-5"><div class="avatar mx-auto mb-2">HS</div><div class="small text-secondary">Ketua RW 26</div><strong>H. Suryana</strong></div></div></div><div class="row g-3 justify-content-center" id="orgGrid"></div></section>
+
+    <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>No HP</th><th>Role</th><th>Wilayah</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data spreadsheet...</td></tr></tbody></table></div></div></div></section>
+
+    <section class="page" id="pengaturan"><div class="mb-4"><div class="eyebrow">KONFIGURASI</div><h1 class="page-title h3">Pengaturan Portal</h1><p class="text-secondary">Atur identitas dan preferensi dasar portal.</p></div><div class="row"><div class="col-xl-8"><div class="card"><div class="card-body p-4"><form id="settingsForm"><div class="row g-3"><div class="col-md-6"><label class="form-label">Nama Portal</label><input class="form-control" value="Portal Manajemen RW 26"></div><div class="col-md-6"><label class="form-label">Kelurahan</label><input class="form-control" value="Pengasinan"></div><div class="col-md-6"><label class="form-label">Kecamatan</label><input class="form-control" value="Rawalumbu"></div><div class="col-md-6"><label class="form-label">Kota</label><input class="form-control" value="Bekasi"></div><div class="col-12"><label class="form-label">Alamat Sekretariat</label><textarea class="form-control" rows="3">Sekretariat RW 26, Kelurahan Pengasinan, Kecamatan Rawalumbu, Kota Bekasi</textarea></div><div class="col-12"><button class="btn btn-primary" type="submit"><i class="bi bi-check2-circle me-2"></i>Simpan Perubahan</button></div></div></form></div></div></div></div></section>
+  </main>
+
+  <div class="modal fade" id="entryModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="entryForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Tambah Data</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="entryType"><div class="mb-3"><label class="form-label">Judul</label><input class="form-control" id="entryTitle" required placeholder="Masukkan judul"></div><div class="mb-3"><label class="form-label">Kategori</label><select class="form-select" id="entryCategory"><option>Informasi</option><option>Kegiatan</option><option>Keamanan</option><option>Kesehatan</option><option>Lingkungan</option></select></div><div><label class="form-label">Keterangan</label><textarea class="form-control" id="entryDescription" rows="4" required placeholder="Tuliskan keterangan..."></textarea></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" type="submit">Simpan Data</button></div></form></div></div></div>
+  <div class="modal fade" id="himbauanModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="himbauanForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Upload Gambar Himbauan</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">Judul</label><input class="form-control" id="himbauanTitle" required placeholder="Contoh: Bank Sampah"></div><div class="mb-3"><label class="form-label">Kategori</label><select class="form-select" id="himbauanCategory"><option>Kegiatan</option><option>Lingkungan</option><option>Keamanan</option><option>Kesehatan</option><option>Informasi</option></select></div><div class="mb-3"><label class="form-label">File Gambar</label><input type="file" class="form-control" id="himbauanFile" accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif" required><div class="form-text">Disarankan PNG/JPG Ukuran 16:9</div></div><div><label class="form-label">Status</label><select class="form-select" id="himbauanStatus"><option>Aktif</option><option>Nonaktif</option></select></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveHimbauanButton" type="submit">Upload & Simpan</button></div></form></div></div></div>
+  <div class="modal fade" id="userModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="userForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Tambah Pengguna</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="editUserId"><div class="row g-3"><div class="col-12"><label class="form-label">Nama Lengkap</label><input class="form-control" id="userName" required></div><div class="col-md-7"><label class="form-label">Email</label><input type="email" class="form-control" id="userEmail" required></div><div class="col-md-5"><label class="form-label">No HP</label><input type="tel" class="form-control" id="userPhone" inputmode="numeric"></div><div class="col-md-6"><label class="form-label">Role ID</label><select class="form-select" id="userRole"><option>Admin RT</option><option>Admin RW</option><option>Editor</option><option>Viewer</option><option>Super Admin</option></select></div><div class="col-md-6"><label class="form-label">Wilayah ID</label><input class="form-control" id="userArea" value="RW026" required></div><div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="userStatus"><option>Aktif</option><option>Nonaktif</option></select></div><div class="col-md-6"><label class="form-label" id="passwordLabel">Password Awal</label><input type="password" class="form-control" id="userPassword" minlength="8" required><div class="form-text d-none" id="passwordHint">Kosongkan jika password tidak diubah.</div></div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveUserButton" type="submit">Tambah User</button></div></form></div></div></div>
+  <div class="toast-container position-fixed bottom-0 end-0 p-3"><div class="toast border-0 shadow" id="liveToast"><div class="toast-body d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill text-success fs-5"></i><span id="toastMessage">Data berhasil disimpan.</span><button type="button" class="btn-close ms-auto" data-bs-dismiss="toast"></button></div></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const announcements = [
+      { title:'Kerja Bakti Lingkungan RW 26', category:'Kegiatan', date:'23 Jun 2026', status:'Terbit', desc:'Kerja bakti serentak dimulai pukul 07.00 WIB. Warga diharapkan membawa peralatan masing-masing.' },
+      { title:'Pemutakhiran Data Kependudukan', category:'Informasi', date:'20 Jun 2026', status:'Terbit', desc:'Mohon setiap kepala keluarga memastikan data anggota keluarga telah sesuai.' },
+      { title:'Jadwal Posyandu Balita & Lansia', category:'Kesehatan', date:'18 Jun 2026', status:'Terbit', desc:'Pelayanan Posyandu Melati dilaksanakan di aula RW mulai pukul 08.00 WIB.' },
+      { title:'Sosialisasi Keamanan Lingkungan', category:'Keamanan', date:'15 Jun 2026', status:'Arsip', desc:'Koordinasi jadwal ronda malam bersama pengurus RT dan Linmas.' }
+    ];
+    const news = [
+      { title:'Warga RW 26 Gelar Gerakan Jumat Bersih', tag:'Lingkungan', date:'14 Juni 2026', icon:'bi-tree-fill', color:'#0a6c50', desc:'Kolaborasi warga menciptakan lingkungan yang lebih bersih, asri, dan nyaman.' },
+      { title:'Pelatihan UMKM Digital untuk Warga', tag:'Ekonomi', date:'10 Juni 2026', icon:'bi-shop', color:'#2f80ed', desc:'Mendorong pelaku usaha lokal memperluas pemasaran melalui kanal digital.' },
+      { title:'Semarak Hari Lanjut Usia Nasional', tag:'Kegiatan', date:'2 Juni 2026', icon:'bi-heart-pulse-fill', color:'#e28b38', desc:'Senam sehat dan pemeriksaan kesehatan gratis bersama para lansia RW 26.' }
+    ];
+    const facilities = [
+      ['Masjid Al-Ikhlas','Tempat Ibadah','bi-moon-stars-fill'], ['Posyandu Melati','Kesehatan','bi-heart-pulse-fill'], ['Aula Warga RW 26','Pertemuan','bi-building-fill'], ['Lapangan Serbaguna','Olahraga','bi-dribbble'], ['Pos Keamanan','Keamanan','bi-shield-check'], ['Taman Bermain','Rekreasi','bi-flower1']
+    ];
+    const orgs = [['Sekretaris','Dedi Kurniawan','DK'],['Bendahara','Siti Aminah','SA'],['Seksi Keamanan','Bambang Susilo','BS'],['Seksi Sosial','Nurhayati','NH'],['Seksi Lingkungan','Rudi Hartono','RH'],['Seksi Pemuda','Fajar Ramadhan','FR']];
+    let users = [];
+    let himbauans = [];
+    const session=window.RW26_SESSION;
+    const apiConfig=window.RW26_CONFIG||{};
+
+    const badgeClass = cat => ({Kegiatan:'badge-soft-warning',Informasi:'badge-soft-success',Kesehatan:'badge-soft-danger',Keamanan:'badge-soft-danger',Lingkungan:'badge-soft-success'}[cat] || 'text-bg-light');
+    function renderAnnouncements(){
+      document.getElementById('announcementTable').innerHTML = announcements.map((a,i)=>`<tr><td><div class="fw-semibold">${a.title}</div><small class="text-secondary">${a.desc.slice(0,55)}...</small></td><td><span class="badge ${badgeClass(a.category)}">${a.category}</span></td><td class="text-nowrap">${a.date}</td><td><span class="status-dot bg-${a.status==='Terbit'?'success':'secondary'}"></span>${a.status}</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-light border" onclick="editNotice(${i})"><i class="bi bi-pencil"></i></button> <button class="btn btn-sm btn-light border text-danger" onclick="deleteNotice(${i})"><i class="bi bi-trash"></i></button></td></tr>`).join('');
+      document.getElementById('dashboardAnnouncements').innerHTML = announcements.slice(0,3).map((a,i)=>`<div class="announcement ${i===1?'warning':''} d-flex gap-3 p-3 mb-2 rounded-end-3 bg-body-tertiary"><div class="mini-date"><strong>${a.date.split(' ')[0]}</strong><small>${a.date.split(' ')[1]}</small></div><div><div class="fw-semibold small">${a.title}</div><div class="text-secondary small text-truncate">${a.desc}</div></div></div>`).join('');
+    }
+    function renderHimbauan(){ const active=himbauans.filter(h=>h.status==='Aktif'&&h.imageUrl); const wrap=document.getElementById('himbauanSliderWrap'); wrap.innerHTML=active.length?`<div id="himbauanCarousel" class="carousel slide" data-bs-ride="carousel"><div class="carousel-indicators">${active.map((_,i)=>`<button type="button" data-bs-target="#himbauanCarousel" data-bs-slide-to="${i}" class="${i===0?'active':''}" aria-label="Slide ${i+1}"></button>`).join('')}</div><div class="carousel-inner rounded-4 shadow-sm">${active.map((h,i)=>`<div class="carousel-item ${i===0?'active':''}"><div class="himbauan-slide"><img src="https://drive.google.com/thumbnail?id=${esc(h.fileId)}&sz=w2000" alt="${esc(h.judul)}"></div></div>`).join('')}</div><button class="carousel-control-prev" type="button" data-bs-target="#himbauanCarousel" data-bs-slide="prev"><span class="carousel-control-prev-icon"></span></button><button class="carousel-control-next" type="button" data-bs-target="#himbauanCarousel" data-bs-slide="next"><span class="carousel-control-next-icon"></span></button></div>`:`<div class="himbauan-empty text-center p-4"><div><div class="facility-icon mx-auto mb-3"><i class="bi bi-images"></i></div><h5 class="fw-bold">Belum ada slide aktif</h5><p class="text-secondary mb-0">Upload gambar himbauan untuk menampilkannya di sini.</p></div></div>`; document.getElementById('himbauanTable').innerHTML=himbauans.length?himbauans.map(h=>{const active=h.status==='Aktif';return `<tr><td class="fw-semibold">${esc(h.id)}</td><td>${esc(h.judul)}</td><td><span class="badge text-bg-light border">${esc(h.kategori)}</span></td><td><a href="${esc(h.driveUrl||h.imageUrl)}" target="_blank" rel="noopener">Lihat gambar</a></td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(h.status)}</span></td><td class="text-end text-nowrap"><button class="btn btn-sm btn-light border" onclick="toggleHimbauan('${esc(h.id)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button> <button class="btn btn-sm btn-light border text-danger" onclick="deleteHimbauan('${esc(h.id)}')" title="Hapus"><i class="bi bi-trash"></i></button></td></tr>`}).join(''):'<tr><td colspan="6" class="text-center text-secondary py-5">Belum ada data himbauan.</td></tr>'; }
+    function renderNews(){ document.getElementById('newsGrid').innerHTML = news.map(n=>`<div class="col-md-6 col-xl-4"><article class="card h-100 overflow-hidden"><div class="d-grid place-items-center" style="height:150px;background:linear-gradient(135deg,${n.color},color-mix(in srgb,${n.color} 60%,#111));place-items:center"><i class="bi ${n.icon} text-white" style="font-size:3.5rem;opacity:.85"></i></div><div class="card-body p-4"><span class="badge ${badgeClass(n.tag)} mb-2">${n.tag}</span><h5 class="fw-bold">${n.title}</h5><p class="text-secondary small">${n.desc}</p><small class="text-secondary"><i class="bi bi-calendar3 me-2"></i>${n.date}</small></div></article></div>`).join(''); }
+    function renderFacilities(){ document.getElementById('facilityGrid').innerHTML = facilities.map(f=>`<div class="col-md-6 col-xl-4"><div class="card h-100"><div class="card-body d-flex align-items-center gap-3"><div class="facility-icon"><i class="bi ${f[2]}"></i></div><div><h6 class="fw-bold mb-1">${f[0]}</h6><div class="text-secondary small">${f[1]}</div><span class="badge badge-soft-success mt-2"><span class="status-dot bg-success"></span>Aktif</span></div><button class="btn btn-sm btn-light border ms-auto"><i class="bi bi-three-dots-vertical"></i></button></div></div></div>`).join(''); }
+    function renderOrg(){ document.getElementById('orgGrid').innerHTML = orgs.map(o=>`<div class="col-6 col-md-4 col-xl-3"><div class="card text-center h-100"><div class="card-body"><div class="avatar mx-auto mb-2">${o[2]}</div><small class="text-secondary">${o[0]}</small><div class="fw-bold small">${o[1]}</div></div></div></div>`).join(''); }
+    function esc(value){const div=document.createElement('div');div.textContent=value??'';return div.innerHTML;}
+    function renderUsers(){ document.getElementById('userTable').innerHTML = users.length?users.map(u=>{const active=u.status==='Aktif';return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.email)}</small></div></div></td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td>${esc(u.wilayah)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button> <button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button> <button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button></td></tr>`}).join(''):'<tr><td colspan="9" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>'; }
+    async function apiRequest(action,payload={}){if(!apiConfig.APPS_SCRIPT_URL?.startsWith('https://script.google.com/'))throw new Error('URL Google Apps Script belum diatur pada config.js.');const response=await fetch(apiConfig.APPS_SCRIPT_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,token:session.token,...payload})});const data=await response.json();if(!data.ok){if(data.message?.includes('Sesi berakhir'))logout(false);throw new Error(data.message||'Permintaan gagal.');}return data;}
+    async function loadUsers(){const error=document.getElementById('userError');error.classList.add('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data spreadsheet...</td></tr>';try{const data=await apiRequest('listUsers');users=data.users;renderUsers();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
+    async function loadHimbauan(){const error=document.getElementById('himbauanError');error.classList.add('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center p-4"><span class="spinner-border spinner-border-sm me-2"></span>Memuat slide himbauan...</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data spreadsheet...</td></tr>';try{const data=await apiRequest('listHimbauan');himbauans=data.himbauan;renderHimbauan();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center text-danger p-4">Slide himbauan tidak dapat dimuat.</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
+    function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('File tidak dapat dibaca.'));reader.readAsDataURL(file);});}
+    function navigate(page){ document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===page)); document.querySelectorAll('.sidebar .nav-link').forEach(a=>a.classList.toggle('active',a.dataset.page===page)); history.replaceState(null,'','#'+page); document.getElementById('sidebar').classList.remove('show'); document.getElementById('overlay').classList.remove('show'); window.scrollTo({top:0,behavior:'smooth'}); }
+    document.querySelectorAll('[data-page],[data-navigate]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();navigate(el.dataset.page||el.dataset.navigate);}));
+    const sidebar=document.getElementById('sidebar'), overlay=document.getElementById('overlay');
+    document.getElementById('openSidebar').onclick=()=>{sidebar.classList.add('show');overlay.classList.add('show')};
+    document.getElementById('closeSidebar').onclick=overlay.onclick=()=>{sidebar.classList.remove('show');overlay.classList.remove('show')};
+    document.getElementById('themeToggle').onclick=()=>{const html=document.documentElement; const dark=html.dataset.bsTheme==='dark'; html.dataset.bsTheme=dark?'light':'dark'; document.querySelector('#themeToggle i').className=`bi bi-${dark?'moon-stars':'sun'} `; localStorage.setItem('rw-theme',html.dataset.bsTheme);};
+    if(localStorage.getItem('rw-theme')==='dark') document.getElementById('themeToggle').click();
+    document.querySelectorAll('[data-bs-target="#entryModal"]').forEach(b=>b.addEventListener('click',()=>{document.getElementById('entryType').value=b.dataset.type;document.querySelector('#entryModal .modal-title').textContent='Tambah '+b.dataset.type;}));
+    const toast=()=>bootstrap.Toast.getOrCreateInstance('#liveToast').show();
+    document.getElementById('entryForm').onsubmit=e=>{e.preventDefault(); const type=document.getElementById('entryType').value,title=document.getElementById('entryTitle').value,category=document.getElementById('entryCategory').value,desc=document.getElementById('entryDescription').value; if(type==='Pengumuman'){announcements.unshift({title,category,date:'18 Jun 2026',status:'Terbit',desc});renderAnnouncements();} else if(type==='Berita'){news.unshift({title,tag:category,date:'18 Juni 2026',icon:'bi-newspaper',color:'#0a6c50',desc});renderNews();} else {facilities.unshift([title,category,'bi-building']);renderFacilities();} bootstrap.Modal.getInstance('#entryModal').hide();e.target.reset();document.getElementById('toastMessage').textContent=type+' berhasil ditambahkan.';toast();};
+    document.getElementById('himbauanForm').onsubmit=async e=>{e.preventDefault();const file=document.getElementById('himbauanFile').files[0],button=document.getElementById('saveHimbauanButton');if(!file)return;button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Mengupload';try{const dataUrl=await fileToDataUrl(file);await apiRequest('createHimbauan',{himbauan:{judul:document.getElementById('himbauanTitle').value.trim(),kategori:document.getElementById('himbauanCategory').value,status:document.getElementById('himbauanStatus').value,fileName:file.name,dataUrl}});bootstrap.Modal.getInstance('#himbauanModal').hide();e.target.reset();document.getElementById('toastMessage').textContent='Gambar himbauan berhasil disimpan ke Drive dan spreadsheet.';toast();await loadHimbauan();}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent='Upload & Simpan';}};
+    document.getElementById('userForm').onsubmit=async e=>{e.preventDefault();const button=document.getElementById('saveUserButton'),userId=document.getElementById('editUserId').value,isEdit=Boolean(userId);button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';const user={userId,nama:document.getElementById('userName').value.trim(),email:document.getElementById('userEmail').value.trim(),noHp:document.getElementById('userPhone').value.trim(),role:document.getElementById('userRole').value,wilayah:document.getElementById('userArea').value.trim(),status:document.getElementById('userStatus').value,password:document.getElementById('userPassword').value};try{await apiRequest(isEdit?'updateUser':'createUser',{user});bootstrap.Modal.getInstance('#userModal').hide();resetUserForm();document.getElementById('toastMessage').textContent=isEdit?'Pengguna berhasil diperbarui.':'Pengguna berhasil ditambahkan ke spreadsheet.';toast();await loadUsers();}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent=isEdit?'Simpan Perubahan':'Tambah User';}};
+    document.getElementById('settingsForm').onsubmit=e=>{e.preventDefault();document.getElementById('toastMessage').textContent='Pengaturan berhasil disimpan.';toast();};
+    window.deleteNotice=i=>{if(confirm('Hapus pengumuman ini?')){announcements.splice(i,1);renderAnnouncements();}};
+    window.editNotice=i=>{document.getElementById('entryTitle').value=announcements[i].title;document.getElementById('entryDescription').value=announcements[i].desc;document.getElementById('entryType').value='Pengumuman';bootstrap.Modal.getOrCreateInstance('#entryModal').show();};
+    window.toggleUser=async userId=>{try{await apiRequest('toggleUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Status pengguna diperbarui.';toast();}catch(err){alert(err.message);}};
+    window.editUser=userId=>{const u=users.find(item=>item.userId===userId);if(!u)return;document.getElementById('editUserId').value=u.userId;document.getElementById('userName').value=u.nama;document.getElementById('userEmail').value=u.email;document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';bootstrap.Modal.getOrCreateInstance('#userModal').show();};
+    window.deleteUser=async userId=>{if(!confirm(`Hapus pengguna ${userId} dari spreadsheet?`))return;try{await apiRequest('deleteUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Pengguna berhasil dihapus.';toast();}catch(err){alert(err.message);}};
+    window.toggleHimbauan=async id=>{try{await apiRequest('toggleHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Status himbauan diperbarui.';toast();}catch(err){alert(err.message);}};
+    window.deleteHimbauan=async id=>{if(!confirm(`Hapus slide himbauan ID ${id}? File di Drive juga akan dipindahkan ke sampah.`))return;try{await apiRequest('deleteHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Himbauan berhasil dihapus.';toast();}catch(err){alert(err.message);}};
+    function resetUserForm(){const form=document.getElementById('userForm');form.reset();document.getElementById('editUserId').value='';document.getElementById('userArea').value='RW026';document.getElementById('userPassword').required=true;document.getElementById('passwordLabel').textContent='Password Awal';document.getElementById('passwordHint').classList.add('d-none');document.querySelector('#userModal .modal-title').textContent='Tambah Pengguna';document.getElementById('saveUserButton').textContent='Tambah User';}
+    document.getElementById('userModal').addEventListener('hidden.bs.modal',resetUserForm);
+    function logout(notifyServer=true){if(notifyServer)apiRequest('logout').catch(()=>{});localStorage.removeItem('rw26_session');sessionStorage.removeItem('rw26_session');location.replace('login.html');}
+    document.getElementById('logoutButton').onclick=()=>logout();
+    document.getElementById('refreshUsers').onclick=loadUsers;
+    document.getElementById('refreshHimbauan').onclick=loadHimbauan;
+    document.getElementById('globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.toLowerCase();const target=[...document.querySelectorAll('.sidebar .nav-link')].find(a=>a.textContent.toLowerCase().includes(q)); if(target)navigate(target.dataset.page);}});
+    document.getElementById('currentDate').textContent=new Intl.DateTimeFormat('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date());
+    if(session?.user){const fullName=String(session.user.nama||'Pengguna').trim();const firstName=fullName.split(/\s+/)[0];document.getElementById('sessionName').textContent=fullName;document.getElementById('sessionRole').textContent=session.user.role;document.getElementById('sessionAvatar').textContent=fullName.split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();document.getElementById('welcomeName').textContent=firstName;}
+    renderAnnouncements();renderNews();renderFacilities();renderOrg();loadUsers();loadHimbauan();
+    const initial=location.hash.slice(1); if(initial&&document.getElementById(initial)) navigate(initial);
+  </script>
+</body>
+</html>
