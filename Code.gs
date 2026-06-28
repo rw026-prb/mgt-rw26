@@ -35,6 +35,7 @@ function doPost(e) {
     switch (body.action) {
       case 'login': return login_(body);
       case 'logout': return logout_(body);
+      case 'publicContent': return publicContent_();
       case 'listUsers': return listUsers_(body);
       case 'createUser': return createUser_(body);
       case 'updateUser': return updateUser_(body);
@@ -110,6 +111,21 @@ function login_(body) {
 function logout_(body) {
   if (body.token) CacheService.getScriptCache().remove('session_' + body.token);
   return json_({ok:true});
+}
+
+function publicContent_() {
+  const organization = {};
+  ORG_SHEET_NAMES.forEach(name => {
+    organization[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r));
+  });
+  return json_({
+    ok:true,
+    himbauan:getHimbauanRows_().map(himbauanRowToObject_).filter(isActive_),
+    announcements:getTableRows_(getInfoSheet_(), 6).map(announcementRowToObject_).filter(isActive_),
+    news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_).filter(isActive_),
+    facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_),
+    organization:organization
+  });
 }
 
 function listUsers_(body) {
@@ -379,6 +395,7 @@ function announcementRowToObject_(row) { const v=row.values; return {id:v[0],jud
 function newsRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[5]) || v[5]); const fileId=extractFileId_(foto); return {id:v[0],judul:v[1],category:v[2],isi:v[3],tanggal:v[4],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,status:v[6]}; }
 function facilityRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {id:v[0],nama:v[1],deskripsi:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,maps:v[4]}; }
 function orgRowToObject_(group, row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {group:group,id:v[0],jabatan:v[1],nama:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w800':foto,fileId:fileId}; }
+function isActive_(item) { return String(item.status || 'Aktif').toLowerCase() === 'aktif'; }
 function validateOrgGroup_(group) { const value=String(group || 'rw'); if (ORG_SHEET_NAMES.indexOf(value) < 0) throw new Error('Jenis struktur organisasi tidak valid.'); return value; }
 function nextId_(rows, prefix) { const max=rows.reduce((m,r)=>Math.max(m,parseInt(String(r[0]).replace(/\D/g,''),10)||0),0); return prefix + String(max+1).padStart(prefix ? 3 : 1, '0'); }
 function saveDriveImage_(item, folderId, label) { if (!item.dataUrl) return ''; const match=String(item.dataUrl).match(/^data:([^;]+);base64,(.+)$/); if(!match) throw new Error('Format file gambar tidak valid.'); const allowed=['image/svg+xml','image/png','image/jpeg','image/webp','image/gif']; if(allowed.indexOf(match[1])<0) throw new Error('Gunakan file SVG, PNG, JPG, WebP, atau GIF.'); const safeName=sanitizeFileName_(item.fileName || label || 'foto'); const blob=Utilities.newBlob(Utilities.base64Decode(match[2]),match[1],safeName); const file=DriveApp.getFolderById(folderId).createFile(blob); file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); const driveUrl='https://drive.google.com/file/d/'+file.getId()+'/view?usp=drive_link'; return '=HYPERLINK("' + driveUrl + '","' + String(label || safeName).replace(/"/g,'""') + '")'; }
