@@ -18,5 +18,8 @@ window.RW26_CONFIG = {
   ORG_SPREADSHEET_ID: '1gkMOBSVkBPuLFphl9yggbmWo7uzGcV7QIamwgnBB9X8',
   ORG_SHEET_NAMES: ['rw', 'bank-sampah', 'pokmas'],
   ORG_DRIVE_FOLDER_ID: '1Tv1y6isGdVpOKdljEPpDexMOW82aWIOI',
+  GALLERY_SPREADSHEET_ID: '1oLjA8Ak_dyQ1d6bjnNf4xKrxaLqgd8fk7LYux0UDKUY',
+  GALLERY_SHEET_NAME: 'album',
+  GALLERY_DRIVE_FOLDER_ID: '18AbNqUjBBgaS4acBKh7_zbB9SqC8bqMO',
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzp7I29gi1gvK9Ry0s-3nzZFXFNbYxB5EbqMP07g6zzCWGbk99gmSUZwOP3mHpggryy/exec'
 };
