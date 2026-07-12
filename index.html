@@ -517,9 +517,11 @@
     function renderMenuCheckboxes(selected) {
       const container = document.getElementById('menuPermissionCheckboxes');
       const menus = ALL_MENUS.filter(m => !ADMIN_ONLY_MENUS.includes(m.id) && m.id !== 'dashboard');
-      container.innerHTML = menus.map(m =>
-        `<div class="col-6"><div class="form-check"><input class="form-check-input menu-checkbox" type="checkbox" id="menu_${m.id}" value="${m.id}" ${(selected||[]).includes(m.id)?'checked':''}><label class="form-check-label small" for="menu_${m.id}"><i class="bi ${m.icon} me-1"></i>${m.label}</label></div></div>`
-      ).join('');
+      container.innerHTML = menus.map(m => {
+        const isProfile = m.id === 'profil';
+        const isChecked = isProfile || (selected||[]).includes(m.id);
+        return `<div class="col-6"><div class="form-check"><input class="form-check-input menu-checkbox" type="checkbox" id="menu_${m.id}" value="${m.id}" ${isChecked?'checked':''} ${isProfile?'disabled':''}><label class="form-check-label small" for="menu_${m.id}"><i class="bi ${m.icon} me-1"></i>${m.label}</label></div></div>`;
+      }).join('');
     }
 
     function toggleMenuPermission() {
@@ -842,6 +844,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     window.toggleHimbauan=async id=>{try{await apiRequest('toggleHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Status himbauan diperbarui.';toast();}catch(err){alert(err.message);}};
     window.deleteHimbauan=async id=>{if(!confirm(`Hapus slide himbauan ID ${id}? File di Drive juga akan dipindahkan ke sampah.`))return;try{await apiRequest('deleteHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Himbauan berhasil dihapus.';toast();}catch(err){alert(err.message);}};
     function resetUserForm(){const form=document.getElementById('userForm');form.reset();document.getElementById('editUserId').value='';document.getElementById('userArea').value='RW026';document.getElementById('userPassword').required=true;document.getElementById('passwordLabel').textContent='Password Awal';document.getElementById('passwordHint').classList.add('d-none');document.querySelector('#userModal .modal-title').textContent='Tambah Pengguna';document.getElementById('saveUserButton').textContent='Tambah User';toggleMenuPermission();renderMenuCheckboxes([]);document.getElementById('userRole').value='Editor';const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');}
+    document.getElementById('userModal').addEventListener('show.bs.modal',()=>{const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');toggleMenuPermission();renderMenuCheckboxes([]);});
     document.getElementById('userModal').addEventListener('hidden.bs.modal',resetUserForm);
     document.getElementById('userRole').addEventListener('change',toggleMenuPermission);
     function logout(notifyServer=true){if(notifyServer)apiRequest('logout').catch(()=>{});localStorage.removeItem('rw26_session');sessionStorage.removeItem('rw26_session');location.replace('login.html');}

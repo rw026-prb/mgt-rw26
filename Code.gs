@@ -239,8 +239,9 @@ function publicKasReport_(params) {
         const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
         if (y < tahun || (y === tahun && m < bulan)) { saldoAwal += masuk - keluar; }
         else if (m === bulan && y === tahun) {
-          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ uraian: row[3], nominal: masuk }); }
-          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ uraian: row[3], nominal: keluar }); }
+          const tglFormatted = Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ tanggal: tglFormatted, uraian: row[3], nominal: masuk }); }
+          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ tanggal: tglFormatted, uraian: row[3], nominal: keluar }); }
         }
       }
     });
@@ -277,6 +278,7 @@ function updateUser_(body) {
   if (!found) throw new Error('Pengguna tidak ditemukan.');
   const current = found.values;
   if (actor.role !== 'Super Admin' && current[4] === 'Super Admin') throw new Error('Anda tidak memiliki izin untuk mengubah akun Super Admin.');
+  if (actor.role !== 'Super Admin' && u.role === 'Super Admin') throw new Error('Hanya Super Admin yang dapat mengubah role ke Super Admin.');
   const passwordHash = u.password ? hashPassword_(u.password) : current[7];
   const menuAkses = u.role === 'Editor' ? JSON.stringify(u.menuAkses || JSON.parse(current[10] || '[]')) : (current[10] || '[]');
   sheet.getRange(found.row,1,1,11).setValues([[current[0],u.nama || current[1],u.email || current[2],u.noHp || '',u.role || current[4],u.wilayah || current[5],u.status || current[6],passwordHash,current[8],current[9],menuAkses]]);
