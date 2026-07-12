@@ -16,7 +16,7 @@ window.RW26_CONFIG = {
   FASUM_SHEET_NAME: 'fasum',
   FASUM_DRIVE_FOLDER_ID: '1lvcZNiAppoztO-J7DL-5qQ8eZBrSya87',
   ORG_SPREADSHEET_ID: '1gkMOBSVkBPuLFphl9yggbmWo7uzGcV7QIamwgnBB9X8',
-  ORG_SHEET_NAMES: ['rw', 'bank-sampah', 'pokmas'],
+  ORG_SHEET_NAMES: ['rw', 'posyandu', 'pkk', 'bank-sampah', 'pokmas'],
   ORG_DRIVE_FOLDER_ID: '1Tv1y6isGdVpOKdljEPpDexMOW82aWIOI',
   GALLERY_SPREADSHEET_ID: '1oLjA8Ak_dyQ1d6bjnNf4xKrxaLqgd8fk7LYux0UDKUY',
   GALLERY_SHEET_NAME: 'album',

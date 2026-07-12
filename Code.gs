@@ -26,7 +26,7 @@ const ACTIVITY_LOG_HEADERS = ['Timestamp','Actor','Role','Action','Module','Desc
 const INFO_SHEET_NAME = 'informasi';
 const NEWS_SHEET_NAME = 'berita';
 const FASUM_SHEET_NAME = 'fasum';
-const ORG_SHEET_NAMES = ['rw','bank-sampah','pokmas'];
+const ORG_SHEET_NAMES = ['rw','posyandu','pkk','bank-sampah','pokmas'];
 const HEADERS = ['User ID','Nama Lengkap','Email','No HP','Role ID','Wilayah ID','Status','Password Hash','Login Terakhir','Tanggal Dibuat','Menu Akses'];
 const HIMBAUAN_HEADERS = ['ID','JUDUL','KATEGORI','GAMBAR','STATUS'];
 const INFO_HEADERS = ['ID','Judul','Kategori','Ringkasan','Tanggal','Status'];
@@ -45,6 +45,9 @@ function doGet(e) {
     if (action === 'publicContent') {
       return publicContent_();
     }
+    if (action === 'publicKasReport') {
+      return publicKasReport_(e.parameter);
+    }
     
     // Fallback jika tidak ada parameter
     return json_({ok:true, service:'Portal RW 26 API', time:formatDate_(new Date())});
@@ -60,6 +63,7 @@ function doPost(e) {
       case 'login': return login_(body);
       case 'logout': return logout_(body);
       case 'publicContent': return publicContent_();
+      case 'publicKasReport': return publicKasReport_(body);
       case 'listUsers': return listUsers_(body);
       case 'createUser': return createUser_(body);
       case 'updateUser': return updateUser_(body);
@@ -191,8 +195,58 @@ function publicContent_() {
     news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_).filter(isActive_),
     facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_),
     organization:organization,
-    gallery: gallery
+    gallery: gallery,
+    statistik: getStatistikRows_().map(statistikRowToObject_)
   });
+}
+
+function publicKasReport_(params) {
+  try {
+    const now = new Date();
+    const targetBulan = parseInt(params && params.bulan, 10);
+    const targetTahun = parseInt(params && params.tahun, 10);
+    const bulan = isNaN(targetBulan) ? now.getMonth() : targetBulan;
+    const tahun = isNaN(targetTahun) ? now.getFullYear() : targetTahun;
+
+    const sheet = getKasSheet_();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return json_({ ok: true, saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [], updatedAt: new Date().toISOString() });
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+    let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
+    const rincianMasuk = [], rincianKeluar = [];
+
+    let latestTimestamp = null;
+    data.forEach(function (row) {
+      const ts = row[1];
+      if (ts instanceof Date && !isNaN(ts) && (!latestTimestamp || ts > latestTimestamp)) latestTimestamp = ts;
+      const tglRaw = row[2];
+      if (!tglRaw) return;
+      var d = null;
+      if (tglRaw instanceof Date) { d = tglRaw; }
+      else if (typeof tglRaw === 'string') {
+        const parts = tglRaw.split('/');
+        if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+      }
+      if (d) {
+        const m = d.getMonth(), y = d.getFullYear();
+        const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
+        if (y < tahun || (y === tahun && m < bulan)) { saldoAwal += masuk - keluar; }
+        else if (m === bulan && y === tahun) {
+          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ uraian: row[3], nominal: masuk }); }
+          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ uraian: row[3], nominal: keluar }); }
+        }
+      }
+    });
+
+    const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
+    const updatedAt = latestTimestamp || new Date();
+    return json_({ ok: true, saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, updatedAt: updatedAt.toISOString() });
+  } catch (err) {
+    return json_({ ok: false, message: err.toString() });
+  }
 }
 
 function listUsers_(body) {
@@ -647,7 +701,7 @@ function createKas_(body) {
   const keluar = item.jenis_form === 'keluar' ? parseInt(item.nominal, 10) : 0;
 
   sheet.getRange(nextRow, 1).setValue('=ROW()-1');
-  sheet.getRange(nextRow, 2).setValue('');
+  sheet.getRange(nextRow, 2).setValue(new Date());
   sheet.getRange(nextRow, 3).setValue(item.tanggal);
   sheet.getRange(nextRow, 4).setValue(item.uraian);
   sheet.getRange(nextRow, 5).setValue(item.pj || 'Bendahara 1');
@@ -696,6 +750,7 @@ function updateKas_(body) {
     }
   }
 
+  sheet.getRange(targetRow, 2).setValue(new Date());
   sheet.getRange(targetRow, 3).setValue(item.tanggal);
   sheet.getRange(targetRow, 4).setValue(item.uraian);
   sheet.getRange(targetRow, 5).setValue(item.pj || 'Bendahara 1');
