@@ -21,5 +21,5 @@ window.RW26_CONFIG = {
   GALLERY_SPREADSHEET_ID: '1oLjA8Ak_dyQ1d6bjnNf4xKrxaLqgd8fk7LYux0UDKUY',
   GALLERY_SHEET_NAME: 'album',
   GALLERY_DRIVE_FOLDER_ID: '18AbNqUjBBgaS4acBKh7_zbB9SqC8bqMO',
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzp7I29gi1gvK9Ry0s-3nzZFXFNbYxB5EbqMP07g6zzCWGbk99gmSUZwOP3mHpggryy/exec'
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx-jZ6Q8SfUblW0oDW7JokjorLll0Jd9xKzvPPcg-LtdharV2_KE4bGfwNOJGchwwcU/exec'
 };
