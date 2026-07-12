@@ -108,6 +108,10 @@ function doPost(e) {
       case 'listGalleryPhotos': return listGalleryPhotos_(body);
       case 'uploadGalleryPhoto': return uploadGalleryPhoto_(body);
       case 'deleteGalleryPhoto': return deleteGalleryPhoto_(body);
+      case 'updateMyProfile': return updateMyProfile_(body);
+      case 'requestPasswordReset': return requestPasswordReset_(body);
+      case 'validateResetToken': return validateResetToken_(body);
+      case 'resetPassword': return resetPassword_(body);
       default: throw new Error('Aksi API tidak dikenal.');
     }
   } catch (err) {
@@ -299,6 +303,100 @@ function deleteUser_(body) {
   getSheet_().deleteRow(found.row);
   logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + found.values[1]);
   return json_({ok:true, message:'Pengguna berhasil dihapus.'});
+}
+
+function updateMyProfile_(body) {
+  const user = requireSession_(body.token);
+  const profile = body.profile || {};
+  if (!profile.email) throw new Error('Email wajib diisi.');
+  if (!profile.currentPassword) throw new Error('Password saat ini wajib diisi untuk keamanan.');
+  const found = findUserRow_(user.userId);
+  if (!found) throw new Error('Pengguna tidak ditemukan.');
+  const current = found.values;
+  const storedHash = String(current[7] || '');
+  const currentHash = hashPassword_(profile.currentPassword);
+  if (storedHash !== currentHash && storedHash !== profile.currentPassword) {
+    throw new Error('Password saat ini salah.');
+  }
+  if (storedHash === profile.currentPassword) {
+    getSheet_().getRange(found.row, 8).setValue(currentHash);
+  }
+  const rows = getRows_(getSheet_());
+  const emailExists = rows.some(r => String(r[0]) !== user.userId && String(r[2]).toLowerCase() === String(profile.email).toLowerCase());
+  if (emailExists) throw new Error('Email sudah digunakan oleh pengguna lain.');
+  const newHash = profile.newPassword ? hashPassword_(profile.newPassword) : current[7];
+  getSheet_().getRange(found.row, 3).setValue(profile.email);
+  getSheet_().getRange(found.row, 4).setValue(profile.noHp || '');
+  if (profile.newPassword) {
+    if (profile.newPassword.length < 8) throw new Error('Password baru minimal 8 karakter.');
+    if (profile.newPassword !== profile.confirmPassword) throw new Error('Konfirmasi password baru tidak cocok.');
+    getSheet_().getRange(found.row, 8).setValue(newHash);
+  }
+  const updatedRow = getRows_(getSheet_()).find(r => String(r[0]) === user.userId);
+  const updatedUser = updatedRow ? rowToUser_(updatedRow) : user;
+  updatedUser.email = profile.email;
+  updatedUser.noHp = profile.noHp || '';
+  CacheService.getScriptCache().put('session_' + body.token, JSON.stringify(updatedUser), SESSION_SECONDS);
+  logActivity_(user, 'update', 'profil', user.nama + ' memperbarui profil sendiri');
+  return json_({ok: true, message: 'Profil berhasil diperbarui.', user: updatedUser});
+}
+
+function requestPasswordReset_(body) {
+  const email = String(body.email || '').trim().toLowerCase();
+  if (!email) throw new Error('Email wajib diisi.');
+  const rows = getRows_(getSheet_());
+  const userRow = rows.find(r => String(r[2]).toLowerCase() === email);
+  if (!userRow) return json_({ok: true, message: 'Link reset password telah dikirim ke email Anda jika terdaftar.'});
+  const userId = String(userRow[0]);
+  const nama = String(userRow[1] || 'User');
+  const token = Utilities.getUuid();
+  const cacheData = JSON.stringify({userId: userId, email: email, nama: nama});
+  CacheService.getScriptCache().put('reset_' + token, cacheData, 900);
+  const siteUrl = String(body.siteUrl || '').replace(/\/+$/, '');
+  const resetUrl = siteUrl + '/reset.html?token=' + token;
+  const htmlBody = '<div style="font-family:DM Sans,Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:16px;border:1px solid #e5e7eb;">' +
+    '<div style="text-align:center;margin-bottom:24px;"><div style="display:inline-block;width:48px;height:48px;border-radius:14px;background:#e9b949;color:#064b3b;font-size:1.3rem;line-height:48px;font-weight:700;">RW</div></div>' +
+    '<h2 style="text-align:center;color:#1a1a1a;font-size:1.3rem;margin-bottom:8px;">Reset Password</h2>' +
+    '<p style="text-align:center;color:#6b7280;font-size:0.9rem;margin-bottom:24px;">Halo <strong>' + nama + '</strong>, Anda meminta reset password untuk akun Portal RW 26.</p>' +
+    '<div style="text-align:center;margin-bottom:24px;"><a href="' + resetUrl + '" style="display:inline-block;padding:14px 32px;background:#0a6c50;color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:0.95rem;">Buat Password Baru</a></div>' +
+    '<p style="color:#6b7280;font-size:0.8rem;text-align:center;margin-bottom:8px;">Link ini berlaku selama <strong>15 menit</strong>.</p>' +
+    '<p style="color:#9ca3af;font-size:0.78rem;text-align:center;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px;">Jika Anda tidak meminta reset password, abaikan email ini. Password Anda tidak akan berubah.</p>' +
+    '</div>';
+  GmailApp.sendEmail(email, 'Reset Password - Portal RW 26', '', {htmlBody: htmlBody, name: 'Portal RW 26'});
+  return json_({ok: true, message: 'Link reset password telah dikirim ke email Anda.'});
+}
+
+function validateResetToken_(body) {
+  const token = String(body.token || '');
+  if (!token) throw new Error('Token tidak valid.');
+  const raw = CacheService.getScriptCache().get('reset_' + token);
+  if (!raw) throw new Error('Token tidak valid atau sudah kedaluwarsa. Silakan minta link reset baru.');
+  const data = JSON.parse(raw);
+  return json_({ok: true, email: data.email, nama: data.nama});
+}
+
+function resetPassword_(body) {
+  const token = String(body.token || '');
+  const newPassword = String(body.newPassword || '');
+  const confirmPassword = String(body.confirmPassword || '');
+  if (!token) throw new Error('Token tidak valid.');
+  if (!newPassword || newPassword.length < 8) throw new Error('Password baru minimal 8 karakter.');
+  if (newPassword !== confirmPassword) throw new Error('Konfirmasi password baru tidak cocok.');
+  const raw = CacheService.getScriptCache().get('reset_' + token);
+  if (!raw) throw new Error('Token tidak valid atau sudah kedaluwarsa. Silakan minta link reset baru.');
+  const data = JSON.parse(raw);
+  const found = findUserRow_(data.userId);
+  if (!found) throw new Error('Pengguna tidak ditemukan.');
+  const newHash = hashPassword_(newPassword);
+  const storedHash = String(found.values[7] || '');
+  if (storedHash === newPassword) {
+    getSheet_().getRange(found.row, 8).setValue(newHash);
+  } else {
+    getSheet_().getRange(found.row, 8).setValue(newHash);
+  }
+  CacheService.getScriptCache().remove('reset_' + token);
+  logActivity_({userId: data.userId, nama: data.nama, role: found.values[4] || ''}, 'update', 'auth', data.nama + ' berhasil reset password');
+  return json_({ok: true, message: 'Password berhasil diubah. Silakan login dengan password baru.'});
 }
 
 function listHimbauan_(body) {
@@ -704,7 +802,7 @@ function createKas_(body) {
   sheet.getRange(nextRow, 2).setValue(new Date());
   sheet.getRange(nextRow, 3).setValue(item.tanggal);
   sheet.getRange(nextRow, 4).setValue(item.uraian);
-  sheet.getRange(nextRow, 5).setValue(item.pj || 'Bendahara 1');
+  sheet.getRange(nextRow, 5).setValue('-');
   sheet.getRange(nextRow, 6).setValue(item.metode || 'Tunai');
   sheet.getRange(nextRow, 7).setValue(masuk);
   sheet.getRange(nextRow, 8).setValue(keluar);
@@ -753,7 +851,7 @@ function updateKas_(body) {
   sheet.getRange(targetRow, 2).setValue(new Date());
   sheet.getRange(targetRow, 3).setValue(item.tanggal);
   sheet.getRange(targetRow, 4).setValue(item.uraian);
-  sheet.getRange(targetRow, 5).setValue(item.pj || 'Bendahara 1');
+  sheet.getRange(targetRow, 5).setValue('-');
   sheet.getRange(targetRow, 6).setValue(item.metode || 'Tunai');
   if (item.jenis_form === 'masuk') {
     sheet.getRange(targetRow, 7).setValue(parseInt(item.nominal, 10));
@@ -814,8 +912,8 @@ function getKasReport_(body) {
         const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
         if (y < targetTahun || (y === targetTahun && m < targetBulan)) { saldoAwal += masuk - keluar; }
         else if (m === targetBulan && y === targetTahun) {
-          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ uraian: row[3], nominal: masuk }); }
-          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ uraian: row[3], nominal: keluar }); }
+          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ tanggal: Utilities.formatDate(d, tz, 'dd/MM/yyyy'), uraian: row[3], nominal: masuk }); }
+          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ tanggal: Utilities.formatDate(d, tz, 'dd/MM/yyyy'), uraian: row[3], nominal: keluar }); }
         }
       }
     });
