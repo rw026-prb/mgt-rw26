@@ -379,7 +379,7 @@
         <h1 class="page-title h3">Profil Saya</h1>
         <p class="text-secondary mb-0">Lihat dan perbarui data profil serta password Anda.</p>
       </div>
-      <div class="alert alert-danger d-none" id="profilError"></div>
+
       <div class="row g-4">
         <div class="col-lg-5">
           <div class="card">
@@ -451,7 +451,7 @@
   <label class="form-label fw-bold">Akses Menu <span class="text-muted small">(centang menu untuk Editor)</span></label>
   <div class="row g-2" id="menuPermissionCheckboxes"></div>
 </div><div class="col-md-6"><label class="form-label">Wilayah ID</label><input class="form-control" id="userArea" value="RW026" required></div><div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="userStatus"><option>Aktif</option><option>Nonaktif</option></select></div><div class="col-md-6"><label class="form-label" id="passwordLabel">Password Awal</label><input type="password" class="form-control" id="userPassword" minlength="8" required><div class="form-text d-none" id="passwordHint">Kosongkan jika password tidak diubah.</div></div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveUserButton" type="submit">Tambah User</button></div></form></div></div></div>
-  <div class="toast-container position-fixed bottom-0 end-0 p-3"><div class="toast border-0 shadow" id="liveToast"><div class="toast-body d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill text-success fs-5"></i><span id="toastMessage">Data berhasil disimpan.</span><button type="button" class="btn-close ms-auto" data-bs-dismiss="toast"></button></div></div></div>
+  <div class="toast-container position-fixed bottom-0 end-0 p-3"><div class="toast border-0 shadow" id="liveToast"><div class="toast-body d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill text-success fs-5" id="toastIcon"></i><span id="toastMessage">Data berhasil disimpan.</span><button type="button" class="btn-close ms-auto" data-bs-dismiss="toast"></button></div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -531,7 +531,7 @@
     }
 
     const badgeClass = cat => ({Kegiatan:'badge-soft-warning',Informasi:'badge-soft-success',Kesehatan:'badge-soft-danger',Keamanan:'badge-soft-danger',Lingkungan:'badge-soft-success'}[cat] || 'text-bg-light');
-    const toast=()=>bootstrap.Toast.getOrCreateInstance('#liveToast').show();
+    const toast=(msg,isError)=>{const icon=document.getElementById('toastIcon');if(isError){icon.className='bi bi-exclamation-triangle-fill text-danger fs-5';}else{icon.className='bi bi-check-circle-fill text-success fs-5';}if(msg)document.getElementById('toastMessage').textContent=msg;bootstrap.Toast.getOrCreateInstance('#liveToast').show();};
     const plainText=html=>{const div=document.createElement('div');div.innerHTML=html||'';return div.textContent||'';};
     const initials=name=>String(name||'RW').trim().split(/\s+/).map(x=>x[0]).slice(0,2).join('').toUpperCase();
     const statusBadge=status=>String(status).toLowerCase()==='aktif'?'<span class="badge badge-soft-success">Aktif</span>':'<span class="badge badge-soft-danger">Nonaktif</span>';
@@ -869,8 +869,6 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     document.getElementById('profilForm').onsubmit=async e=>{
       e.preventDefault();
       const btn=document.getElementById('profilSubmit');
-      const errEl=document.getElementById('profilError');
-      errEl.classList.add('d-none');
       const email=document.getElementById('profilEmail').value.trim();
       const noHp=document.getElementById('profilNoHp').value.trim();
       const currentPassword=document.getElementById('profilCurrentPassword').value;
@@ -883,12 +881,17 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
       btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';
       try{
         const res=await apiRequest('updateMyProfile',{profile:{email,noHp,currentPassword,newPassword:newPassword||'',confirmPassword:confirmPassword||''}});
-        if(res.user){session.user=res.user;localStorage.setItem('rw26_session',JSON.stringify(session));}
-        document.getElementById('toastMessage').textContent='Profil berhasil diperbarui.';toast();
-        document.getElementById('profilCurrentPassword').value='';
-        document.getElementById('profilNewPassword').value='';
-        document.getElementById('profilConfirmPassword').value='';
-      }catch(err){errEl.textContent=err.message;errEl.classList.remove('d-none');}
+        if(newPassword){
+          toast('Password berhasil diubah. Silakan login kembali dengan password baru.');
+          setTimeout(()=>logout(false),2000);
+        }else{
+          if(res.user){session.user=res.user;localStorage.setItem('rw26_session',JSON.stringify(session));}
+          toast('Profil berhasil diperbarui.');
+          document.getElementById('profilCurrentPassword').value='';
+          document.getElementById('profilNewPassword').value='';
+          document.getElementById('profilConfirmPassword').value='';
+        }
+      }catch(err){toast(err.message,true);}
       finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-check2-circle me-2"></i>Simpan Perubahan';}
     };
     document.getElementById('logoutButton').onclick=()=>logout();

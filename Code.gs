@@ -246,6 +246,12 @@ function publicKasReport_(params) {
       }
     });
 
+    const sortByDateAsc = (a, b) => {
+      const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
+      return p(a.tanggal) - p(b.tanggal);
+    };
+    rincianMasuk.sort(sortByDateAsc);
+    rincianKeluar.sort(sortByDateAsc);
     const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
     const updatedAt = latestTimestamp || new Date();
     return json_({ ok: true, saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, updatedAt: updatedAt.toISOString() });
@@ -767,7 +773,10 @@ function kasRowToObject_(row) {
 
 function listKas_(body) {
   requireSession_(body.token);
-  const allRows = getKasRows_().map(kasRowToObject_).reverse();
+  const allRows = getKasRows_().map(kasRowToObject_).sort((a, b) => {
+    const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
+    return p(b.tanggal) - p(a.tanggal);
+  });
   const total = allRows.length;
   const page = Math.max(1, parseInt(body.page, 10) || 1);
   const perPage = Math.max(1, Math.min(50, parseInt(body.perPage, 10) || 10));
@@ -919,6 +928,12 @@ function getKasReport_(body) {
         }
       }
     });
+    const sortByDateAsc = (a, b) => {
+      const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
+      return p(a.tanggal) - p(b.tanggal);
+    };
+    rincianMasuk.sort(sortByDateAsc);
+    rincianKeluar.sort(sortByDateAsc);
     const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
     return json_({ ok: true, saldoAwal, totalMasuk, totalKeluar, saldoAkhir, rincianMasuk, rincianKeluar });
   } catch (err) {
