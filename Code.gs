@@ -95,6 +95,8 @@ function doPost(e) {
       case 'createKas': return createKas_(body);
       case 'updateKas': return updateKas_(body);
       case 'deleteKas': return deleteKas_(body);
+      case 'approveKas': return approveKas_(body);
+      case 'rejectKas': return rejectKas_(body);
       case 'getKasReport': return getKasReport_(body);
       case 'getKasDashboard': return getKasDashboard_(body);
       case 'listStatistik': return listStatistik_(body);
@@ -218,12 +220,14 @@ function publicKasReport_(params) {
       return json_({ ok: true, saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [], updatedAt: new Date().toISOString() });
     }
 
-    const data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+    const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
     let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
     const rincianMasuk = [], rincianKeluar = [];
 
     let latestTimestamp = null;
     data.forEach(function (row) {
+      const status = String(row[11] || 'Menunggu');
+      if (status !== 'Disetujui') return;
       const ts = row[1];
       if (ts instanceof Date && !isNaN(ts) && (!latestTimestamp || ts > latestTimestamp)) latestTimestamp = ts;
       const tglRaw = row[2];
@@ -743,8 +747,8 @@ function getKasSheet_() { return openSheet_(KAS_SPREADSHEET_ID, KAS_SHEET_NAME);
 function getKasRows_() {
   const sheet = getKasSheet_(), last = sheet.getLastRow();
   if (last < 2) return [];
-  const values = sheet.getRange(2, 1, last - 1, 11).getValues();
-  const formulas = sheet.getRange(2, 1, last - 1, 11).getFormulas();
+  const values = sheet.getRange(2, 1, last - 1, 14).getValues();
+  const formulas = sheet.getRange(2, 1, last - 1, 14).getFormulas();
   return values.map((v, i) => ({ row: i + 2, values: v, formulas: formulas[i] })).filter(r => r.values[0]);
 }
 
@@ -758,6 +762,8 @@ function kasRowToObject_(row) {
   const linkRaw = String(f[10] || v[10] || '');
   const m = linkRaw.match(/HYPERLINK\("([^"]+)"/i);
   const fileUrl = m ? m[1] : (linkRaw.match(/https?:\/\/[^",\s)]+/) || [''])[0];
+  const fileId = extractFileId_(fileUrl);
+  const imageUrl = fileId ? 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200' : fileUrl;
   return {
     rowNum: row.row,
     tanggal: String(tglStr),
@@ -767,12 +773,17 @@ function kasRowToObject_(row) {
     masuk: Number(v[6]) || 0,
     keluar: Number(v[7]) || 0,
     keterangan: String(v[8] || ''),
-    fileUrl: fileUrl
+    fileUrl: fileUrl,
+    fileId: fileId,
+    imageUrl: imageUrl,
+    status: String(v[11] || 'Menunggu'),
+    createdBy: String(v[12] || ''),
+    approvedBy: String(v[13] || '')
   };
 }
 
 function listKas_(body) {
-  requireSession_(body.token);
+  var session = requireSession_(body.token);
   const allRows = getKasRows_().map(kasRowToObject_).sort((a, b) => {
     const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
     return p(b.tanggal) - p(a.tanggal);
@@ -783,11 +794,11 @@ function listKas_(body) {
   const totalPages = Math.ceil(total / perPage) || 1;
   const start = (page - 1) * perPage;
   const data = allRows.slice(start, start + perPage);
-  return json_({ ok: true, data, total, page, perPage, totalPages });
+  return json_({ ok: true, data, total, page, perPage, totalPages, userRole: session.role, userId: session.userId, userNama: session.nama });
 }
 
 function createKas_(body) {
-  requireMenuAccess_(body.token, 'kas');
+  var session = requireMenuAccess_(body.token, 'kas');
   const item = body.kas || {};
   if (!item.tanggal || !item.uraian || !item.nominal || !item.jenis_form) throw new Error('Tanggal, uraian, nominal, dan jenis transaksi wajib diisi.');
   const sheet = getKasSheet_();
@@ -802,7 +813,7 @@ function createKas_(body) {
       const blob = Utilities.newBlob(Utilities.base64Decode(match[2]), match[1], safeName);
       const file = DriveApp.getFolderById(KAS_DRIVE_FOLDER_ID).createFile(blob);
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      linkFormula = '=HYPERLINK("' + file.getUrl() + '"; "Lihat Bukti Foto 1")';
+      linkFormula = '=HYPERLINK("' + file.getUrl() + '"; "Lihat Bukti Foto")';
     }
   }
 
@@ -819,18 +830,20 @@ function createKas_(body) {
   sheet.getRange(nextRow, 8).setValue(keluar);
   sheet.getRange(nextRow, 9).setValue(item.keterangan || '-');
   if (nextRow === 2) {
-    sheet.getRange(nextRow, 10).setFormula('=G2-H2');
+    sheet.getRange(nextRow, 10).setFormula('=IF(L2="Disetujui";G2-H2;0)');
   } else {
-    sheet.getRange(nextRow, 10).setFormula('=INDEX($J$2:J' + (nextRow - 1) + ';ROWS($J$2:J' + (nextRow - 1) + '))+G' + nextRow + '-H' + nextRow);
+    sheet.getRange(nextRow, 10).setFormula('=$J' + (nextRow - 1) + '+IF(L' + nextRow + '="Disetujui";G' + nextRow + '-H' + nextRow + ';0)');
   }
   sheet.getRange(nextRow, 11).setFormula(linkFormula);
+  sheet.getRange(nextRow, 12).setValue('Menunggu');
+  sheet.getRange(nextRow, 13).setValue(session.nama);
 
-  logActivity_(requireSession_(body.token), 'create', 'kas', 'Menambah transaksi "' + item.uraian + '" (' + item.jenis_form + ' Rp' + parseInt(item.nominal, 10).toLocaleString('id-ID') + ')');
-  return json_({ ok: true, message: 'Transaksi berhasil disimpan.' });
+  logActivity_(session, 'create', 'kas', 'Menambah transaksi "' + item.uraian + '" (' + item.jenis_form + ' Rp' + parseInt(item.nominal, 10).toLocaleString('id-ID') + ')');
+  return json_({ ok: true, message: 'Transaksi berhasil disimpan. Menunggu persetujuan admin.' });
 }
 
 function updateKas_(body) {
-  requireMenuAccess_(body.token, 'kas');
+  var session = requireMenuAccess_(body.token, 'kas');
   const item = body.kas || {};
   const targetRow = parseInt(item.rowNum, 10);
   if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
@@ -873,31 +886,85 @@ function updateKas_(body) {
   }
   sheet.getRange(targetRow, 9).setValue(item.keterangan || '-');
 
-  const lastRow = sheet.getLastRow();
-  for (let i = targetRow; i <= lastRow; i++) {
-    if (i === 2) {
-      sheet.getRange(i, 10).setFormula('=G2-H2');
-    } else {
-      sheet.getRange(i, 10).setFormula('=INDEX($J$2:J' + (i - 1) + ';ROWS($J$2:J' + (i - 1) + '))+G' + i + '-H' + i);
-    }
+  if (item.status === 'Menunggu') {
+    sheet.getRange(targetRow, 12).setValue('Menunggu');
   }
-  logActivity_(requireSession_(body.token), 'update', 'kas', 'Memperbarui transaksi "' + item.uraian + '"');
+
+  updateKasBalances_(sheet, targetRow);
+  logActivity_(session, 'update', 'kas', 'Memperbarui transaksi "' + item.uraian + '"');
   return json_({ ok: true, message: 'Transaksi berhasil diperbarui.' });
 }
 
 function deleteKas_(body) {
-  requireMenuAccess_(body.token, 'kas');
+  const user = requireMenuAccess_(body.token, 'kas');
+  const session = requireSession_(body.token);
   const targetRow = parseInt(body.rowNum, 10);
   if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
   const sheet = getKasSheet_();
-  sheet.deleteRow(targetRow);
-  const lastRow = sheet.getLastRow();
-  for (let i = targetRow; i <= lastRow; i++) {
-    if (i === 2) { sheet.getRange(i, 10).setFormula('=G2-H2'); }
-    else { sheet.getRange(i, 10).setFormula('=INDEX($J$2:J' + (i - 1) + ';ROWS($J$2:J' + (i - 1) + '))+G' + i + '-H' + i); }
+
+  if (!['Super Admin', 'Admin'].includes(session.role)) {
+    const currentStatus = String(sheet.getRange(targetRow, 12).getValue() || 'Menunggu');
+    const currentCreator = String(sheet.getRange(targetRow, 13).getValue() || '');
+    if (currentStatus !== 'Menunggu' && currentStatus !== 'Ditolak') throw new Error('Anda hanya bisa menghapus transaksi Menunggu atau Ditolak.');
+    if (currentCreator !== session.nama) throw new Error('Anda hanya bisa menghapus transaksi milik Anda sendiri.');
   }
-  logActivity_(requireSession_(body.token), 'delete', 'kas', 'Menghapus transaksi pada baris ' + targetRow);
+
+  var formulaLama = String(sheet.getRange(targetRow, 11).getFormula() || '');
+  var valueLama = String(sheet.getRange(targetRow, 11).getValue() || '');
+  var stringCek = formulaLama || valueLama;
+  if (stringCek) {
+    var idFile = '';
+    var m1 = stringCek.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    var m2 = stringCek.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (m1) idFile = m1[1]; else if (m2) idFile = m2[1];
+    if (idFile) try { DriveApp.getFileById(idFile).setTrashed(true); } catch (e) {}
+  }
+
+  sheet.deleteRow(targetRow);
+  updateKasBalances_(sheet, targetRow);
+  logActivity_(session, 'delete', 'kas', 'Menghapus transaksi pada baris ' + targetRow);
   return json_({ ok: true, message: 'Transaksi berhasil dihapus.' });
+}
+
+function updateKasBalances_(sheet, fromRow) {
+  var lastRow = sheet.getLastRow();
+  for (var i = Math.max(2, fromRow); i <= lastRow; i++) {
+    if (i === 2) {
+      sheet.getRange(i, 10).setFormula('=IF(L2="Disetujui";G2-H2;0)');
+    } else {
+      sheet.getRange(i, 10).setFormula('=$J' + (i - 1) + '+IF(L' + i + '="Disetujui";G' + i + '-H' + i + ';0)');
+    }
+  }
+}
+
+function approveKas_(body) {
+  var session = requireSession_(body.token);
+  if (!['Super Admin', 'Admin'].includes(session.role)) throw new Error('Hanya Admin atau Super Admin yang dapat menyetujui transaksi.');
+  var targetRow = parseInt(body.rowNum, 10);
+  if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
+  var sheet = getKasSheet_();
+  var currentStatus = String(sheet.getRange(targetRow, 12).getValue() || '');
+  if (currentStatus !== 'Menunggu') throw new Error('Hanya transaksi berstatus Menunggu yang dapat disetujui.');
+  sheet.getRange(targetRow, 12).setValue('Disetujui');
+  sheet.getRange(targetRow, 14).setValue(session.nama);
+  updateKasBalances_(sheet, targetRow);
+  logActivity_(session, 'approve', 'kas', 'Menyetujui transaksi pada baris ' + targetRow);
+  return json_({ ok: true, message: 'Transaksi berhasil disetujui.' });
+}
+
+function rejectKas_(body) {
+  var session = requireSession_(body.token);
+  if (!['Super Admin', 'Admin'].includes(session.role)) throw new Error('Hanya Admin atau Super Admin yang dapat menolak transaksi.');
+  var targetRow = parseInt(body.rowNum, 10);
+  if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
+  var sheet = getKasSheet_();
+  var currentStatus = String(sheet.getRange(targetRow, 12).getValue() || '');
+  if (currentStatus !== 'Menunggu') throw new Error('Hanya transaksi berstatus Menunggu yang dapat ditolak.');
+  sheet.getRange(targetRow, 12).setValue('Ditolak');
+  sheet.getRange(targetRow, 14).setValue('');
+  updateKasBalances_(sheet, targetRow);
+  logActivity_(session, 'reject', 'kas', 'Menolak transaksi pada baris ' + targetRow);
+  return json_({ ok: true, message: 'Transaksi berhasil ditolak.' });
 }
 
 function getKasReport_(body) {
@@ -906,10 +973,12 @@ function getKasReport_(body) {
     const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
     let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0, rincianMasuk = [], rincianKeluar = [];
     if (lastRow < 2) return json_({ ok: true, saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [] });
-    const data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+    const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
     const targetBulan = parseInt(body.bulan, 10), targetTahun = parseInt(body.tahun, 10);
     const tz = Session.getScriptTimeZone();
     data.forEach(row => {
+      const status = String(row[11] || 'Menunggu');
+      if (status !== 'Disetujui') return;
       const tglRaw = row[2];
       if (!tglRaw) return;
       let d = null;
@@ -948,9 +1017,14 @@ function getKasDashboard_(body) {
     if (lastRow < 2) return json_({ ok: true, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, jumlahTransaksi: 0 });
     const now = new Date();
     const targetBulan = now.getMonth(), targetTahun = now.getFullYear();
-    const data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
-    let totalMasuk = 0, totalKeluar = 0, jumlahTransaksi = 0;
+    const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+    let totalMasuk = 0, totalKeluar = 0, jumlahTransaksi = 0, menungguCount = 0, ditolakCount = 0;
+    const userNama = session.nama;
     data.forEach(row => {
+      const status = String(row[11] || 'Menunggu');
+      if (status === 'Menunggu') menungguCount++;
+      if (status === 'Ditolak' && String(row[12] || '') === userNama) ditolakCount++;
+      if (status !== 'Disetujui') return;
       const tglRaw = row[2];
       if (!tglRaw) return;
       let d = null;
@@ -969,7 +1043,7 @@ function getKasDashboard_(body) {
         }
       }
     });
-    return json_({ ok: true, totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi });
+    return json_({ ok: true, totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi, menungguCount, ditolakCount });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
   }
