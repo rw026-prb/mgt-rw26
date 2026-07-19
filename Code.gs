@@ -99,6 +99,7 @@ function doPost(e) {
       case 'rejectKas': return rejectKas_(body);
       case 'getKasReport': return getKasReport_(body);
       case 'getKasDashboard': return getKasDashboard_(body);
+      case 'getKasCashFlow': return getKasCashFlow_(body);
       case 'listStatistik': return listStatistik_(body);
       case 'createStatistik': return createStatistik_(body);
       case 'updateStatistik': return updateStatistik_(body);
@@ -1011,19 +1012,26 @@ function getKasReport_(body) {
 }
 
 function getKasDashboard_(body) {
-  requireSession_(body.token);
+  var session = requireSession_(body.token);
   try {
     const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
-    if (lastRow < 2) return json_({ ok: true, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, jumlahTransaksi: 0 });
+    if (lastRow < 2) return json_({ ok: true, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, jumlahTransaksi: 0, menungguCount: 0, ditolakCount: 0, notifications: [] });
     const now = new Date();
     const targetBulan = now.getMonth(), targetTahun = now.getFullYear();
     const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
     let totalMasuk = 0, totalKeluar = 0, jumlahTransaksi = 0, menungguCount = 0, ditolakCount = 0;
     const userNama = session.nama;
-    data.forEach(row => {
+    const notifications = [];
+    data.forEach((row, idx) => {
       const status = String(row[11] || 'Menunggu');
-      if (status === 'Menunggu') menungguCount++;
-      if (status === 'Ditolak' && String(row[12] || '') === userNama) ditolakCount++;
+      if (status === 'Menunggu') {
+        menungguCount++;
+        notifications.push({ type: 'menunggu', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
+      }
+      if (status === 'Ditolak' && String(row[12] || '') === userNama) {
+        ditolakCount++;
+        notifications.push({ type: 'ditolak', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
+      }
       if (status !== 'Disetujui') return;
       const tglRaw = row[2];
       if (!tglRaw) return;
@@ -1043,7 +1051,55 @@ function getKasDashboard_(body) {
         }
       }
     });
-    return json_({ ok: true, totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi, menungguCount, ditolakCount });
+    return json_({ ok: true, totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi, menungguCount, ditolakCount, notifications });
+  } catch (err) {
+    return json_({ ok: false, message: err.toString() });
+  }
+}
+
+function getKasCashFlow_(body) {
+  requireSession_(body.token);
+  try {
+    const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
+    if (lastRow < 2) return json_({ ok: true, data: [] });
+    const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+    const bulanAwal = parseInt(body.bulanAwal, 10), tahunAwal = parseInt(body.tahunAwal, 10);
+    const bulanAkhir = parseInt(body.bulanAkhir, 10), tahunAkhir = parseInt(body.tahunAkhir, 10);
+    const namaBulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    const months = [];
+    let y = tahunAwal, m = bulanAwal;
+    while (y < tahunAkhir || (y === tahunAkhir && m <= bulanAkhir)) {
+      months.push({ bulan: m, tahun: y, label: namaBulan[m] + ' ' + y, masuk: 0, keluar: 0 });
+      m++;
+      if (m > 11) { m = 0; y++; }
+    }
+    let saldoAll = 0;
+    data.forEach(row => {
+      const status = String(row[11] || 'Menunggu');
+      if (status !== 'Disetujui') return;
+      const tglRaw = row[2];
+      if (!tglRaw) return;
+      let d = null;
+      if (tglRaw instanceof Date) { d = tglRaw; }
+      else if (typeof tglRaw === 'string') {
+        const parts = tglRaw.split('/');
+        if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+      }
+      if (!d) return;
+      const dm = d.getMonth(), dy = d.getFullYear();
+      const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
+      if (dy < tahunAwal || (dy === tahunAwal && dm < bulanAwal)) {
+        saldoAll += masuk - keluar;
+      }
+      const found = months.find(x => x.bulan === dm && x.tahun === dy);
+      if (found) { found.masuk += masuk; found.keluar += keluar; }
+    });
+    let saldo = saldoAll;
+    const result = months.map(x => {
+      saldo += x.masuk - x.keluar;
+      return { label: x.label, masuk: x.masuk, keluar: x.keluar, saldo: saldo };
+    });
+    return json_({ ok: true, data: result });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
   }
