@@ -33,8 +33,56 @@ const INFO_HEADERS = ['ID','Judul','Kategori','Ringkasan','Tanggal','Status'];
 const NEWS_HEADERS = ['ID','Judul','Kategory','Isi','Tanggal','Foto','Status'];
 const FASUM_HEADERS = ['ID','NAMA','DESKRIPSI','FOTO','MAPS lokasi'];
 const ORG_HEADERS = ['ID','JABATAN','NAMA','FOTO'];
-const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status'];
+const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status','Jumlah Foto','Thumbnail ID'];
 const SESSION_SECONDS = 1800;
+const DATA_CACHE_TTL = 120;
+const PUBLIC_CACHE_TTL = 120;
+const GALLERY_CACHE_TTL = 600;
+
+function cacheGet_(key) {
+  const raw = CacheService.getScriptCache().get(key);
+  if (raw == null) return undefined;
+  try { return JSON.parse(raw); } catch (e) { return undefined; }
+}
+
+function cacheSet_(key, value, ttl) {
+  if (value === undefined) return;
+  try {
+    CacheService.getScriptCache().put(key, JSON.stringify(value), ttl);
+  } catch (e) {}
+}
+
+function cachedData_(key, ttl, compute) {
+  const hit = cacheGet_(key);
+  if (hit !== undefined) return hit;
+  const data = compute();
+  cacheSet_(key, data, ttl);
+  return data;
+}
+
+function versionedKey_(module, suffix) {
+  const ver = CacheService.getScriptCache().get('ver_' + module) || '0';
+  return 'v' + ver + '_' + module + (suffix ? '_' + suffix : '');
+}
+
+function invalidateData_(module) {
+  const cache = CacheService.getScriptCache();
+  const staticKeys = {
+    himbauan: ['list_himbauan'],
+    pengumuman: ['list_announcements'],
+    berita: ['list_news'],
+    fasilitas: ['list_facilities'],
+    organisasi: ['list_organization'],
+    statistik: ['list_statistik'],
+    users: ['list_users'],
+    galeri: ['list_gallery_albums'],
+    kas: ['list_kas']
+  };
+  (staticKeys[module] || []).forEach(key => cache.remove(key));
+  cache.remove('public_content');
+  const cur = parseInt(cache.get('ver_' + module) || '0', 10);
+  cache.put('ver_' + module, String(cur + 1), 3600);
+}
 
 function doGet(e) {
   try {
@@ -100,6 +148,7 @@ function doPost(e) {
       case 'getKasReport': return getKasReport_(body);
       case 'getKasDashboard': return getKasDashboard_(body);
       case 'getKasCashFlow': return getKasCashFlow_(body);
+      case 'dashboardData': return dashboardData_(body);
       case 'listStatistik': return listStatistik_(body);
       case 'createStatistik': return createStatistik_(body);
       case 'updateStatistik': return updateStatistik_(body);
@@ -147,20 +196,34 @@ function login_(body) {
   const identifier = String(body.identifier || '').trim().toLowerCase();
   const password = String(body.password || '');
   if (!identifier || !password) throw new Error('User ID/email dan password wajib diisi.');
+  const cache = CacheService.getScriptCache();
+  const failKey = 'login_fail_' + identifier;
+  const failCount = parseInt(cache.get(failKey) || '0', 10);
+  if (failCount >= 5) throw new Error('Terlalu banyak percobaan gagal. Akun dikunci sementara, coba lagi dalam 10 menit.');
   const sheet = getSheet_(), rows = getRows_(sheet);
   const index = rows.findIndex(r => String(r[0]).toLowerCase() === identifier || String(r[2]).toLowerCase() === identifier);
-  if (index < 0) throw new Error('Akun tidak ditemukan.');
+  if (index < 0) {
+    cache.put(failKey, String(failCount + 1), 600);
+    throw new Error('User ID/email atau password salah.');
+  }
   const row = rows[index];
   if (String(row[6]).toLowerCase() !== 'aktif') throw new Error('Akun sedang nonaktif. Hubungi administrator.');
-  const incomingHash = hashPassword_(password);
   const stored = String(row[7] || '');
-  if (stored !== incomingHash && stored !== password) throw new Error('Password yang Anda masukkan salah.');
+  if (!verifyPassword_(password, stored)) {
+    cache.put(failKey, String(failCount + 1), 600);
+    throw new Error('User ID/email atau password salah. Percobaan ' + (failCount + 1) + '/5.');
+  }
+  cache.remove(failKey);
   const rowNumber = index + 2;
-  if (stored === password) sheet.getRange(rowNumber,8).setValue(incomingHash);
-  sheet.getRange(rowNumber,9).setValue(formatDate_(new Date()));
+  const now = formatDate_(new Date());
+  if (stored.indexOf('pbkdf2$') !== 0) {
+    sheet.getRange(rowNumber, 8, 1, 2).setValues([[hashPassword_(password), now]]);
+  } else {
+    sheet.getRange(rowNumber, 9).setValue(now);
+  }
   const token = Utilities.getUuid() + Utilities.getUuid();
-  const user = rowToUser_(row); user.loginTerakhir = formatDate_(new Date());
-  CacheService.getScriptCache().put('session_' + token, JSON.stringify(user), SESSION_SECONDS);
+  const user = rowToUser_(row); user.loginTerakhir = now;
+  cache.put('session_' + token, JSON.stringify(user), SESSION_SECONDS);
   logActivity_(user, 'login', 'auth', user.nama + ' login ke portal');
   return json_({ok:true, token:token, user:user, expiresAt:Date.now() + SESSION_SECONDS * 1000});
 }
@@ -171,6 +234,10 @@ function logout_(body) {
 }
 
 function publicContent_() {
+  return json_(cachedData_('public_content', PUBLIC_CACHE_TTL, publicContentData_));
+}
+
+function publicContentData_() {
   const organization = {};
   ORG_SHEET_NAMES.forEach(name => {
     organization[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r));
@@ -195,16 +262,16 @@ function publicContent_() {
     })
     .filter(album => album.photos.length > 0);
   
-  return json_({
+  return {
     ok:true,
     himbauan:getHimbauanRows_().map(himbauanRowToObject_).filter(isActive_),
-    announcements:getTableRows_(getInfoSheet_(), 6).map(announcementRowToObject_).filter(isActive_),
+    announcements:getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_).filter(isActive_),
     news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_).filter(isActive_),
     facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_),
     organization:organization,
     gallery: gallery,
     statistik: getStatistikRows_().map(statistikRowToObject_)
-  });
+  };
 }
 
 function publicKasReport_(params) {
@@ -214,18 +281,30 @@ function publicKasReport_(params) {
     const targetTahun = parseInt(params && params.tahun, 10);
     const bulan = isNaN(targetBulan) ? now.getMonth() : targetBulan;
     const tahun = isNaN(targetTahun) ? now.getFullYear() : targetTahun;
+    const key = versionedKey_('kas', 'pub_' + tahun + '_' + bulan);
+    const data = cachedData_(key, PUBLIC_CACHE_TTL, function () {
+      const r = kasReportData_(bulan, tahun);
+      return {
+        saldoAwal: r.saldoAwal, totalMasuk: r.totalMasuk, totalKeluar: r.totalKeluar,
+        saldoAkhir: r.saldoAkhir, rincianMasuk: r.rincianMasuk, rincianKeluar: r.rincianKeluar,
+        updatedAt: (r.latestTimestamp || new Date()).toISOString()
+      };
+    });
+    return json_({ ok: true, ...data });
+  } catch (err) {
+    return json_({ ok: false, message: err.toString() });
+  }
+}
 
-    const sheet = getKasSheet_();
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) {
-      return json_({ ok: true, saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [], updatedAt: new Date().toISOString() });
-    }
+function kasReportData_(bulan, tahun) {
+  const sheet = getKasSheet_();
+  const lastRow = sheet.getLastRow();
+  const tz = Session.getScriptTimeZone();
+  let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0, latestTimestamp = null;
+  const rincianMasuk = [], rincianKeluar = [];
 
+  if (lastRow >= 2) {
     const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
-    let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0;
-    const rincianMasuk = [], rincianKeluar = [];
-
-    let latestTimestamp = null;
     data.forEach(function (row) {
       const status = String(row[11] || 'Menunggu');
       if (status !== 'Disetujui') return;
@@ -244,30 +323,27 @@ function publicKasReport_(params) {
         const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
         if (y < tahun || (y === tahun && m < bulan)) { saldoAwal += masuk - keluar; }
         else if (m === bulan && y === tahun) {
-          const tglFormatted = Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+          const tglFormatted = Utilities.formatDate(d, tz, 'dd/MM/yyyy');
           if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ tanggal: tglFormatted, uraian: row[3], nominal: masuk }); }
           if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ tanggal: tglFormatted, uraian: row[3], nominal: keluar }); }
         }
       }
     });
-
-    const sortByDateAsc = (a, b) => {
-      const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
-      return p(a.tanggal) - p(b.tanggal);
-    };
-    rincianMasuk.sort(sortByDateAsc);
-    rincianKeluar.sort(sortByDateAsc);
-    const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
-    const updatedAt = latestTimestamp || new Date();
-    return json_({ ok: true, saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, updatedAt: updatedAt.toISOString() });
-  } catch (err) {
-    return json_({ ok: false, message: err.toString() });
   }
+
+  const sortByDateAsc = (a, b) => {
+    const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
+    return p(a.tanggal) - p(b.tanggal);
+  };
+  rincianMasuk.sort(sortByDateAsc);
+  rincianKeluar.sort(sortByDateAsc);
+  const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
+  return { saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, latestTimestamp: latestTimestamp };
 }
 
 function listUsers_(body) {
   requireAdmin_(body.token);
-  return json_({ok:true, users:getRows_(getSheet_()).map(rowToUser_)});
+  return json_({ok:true, users:cachedData_('list_users', DATA_CACHE_TTL, function(){ return getRows_(getSheet_()).map(rowToUser_); })});
 }
 
 function createUser_(body) {
@@ -278,8 +354,9 @@ function createUser_(body) {
   if (actor.role !== 'Super Admin' && u.role === 'Super Admin') throw new Error('Hanya Super Admin yang dapat membuat akun Super Admin.');
   const id = nextUserId_(rows);
   const menuAkses = u.role === 'Editor' ? JSON.stringify(u.menuAkses || []) : '[]';
-  sheet.appendRow([id,u.nama,u.email,u.noHp || '',u.role || 'Editor',u.wilayah || 'RW026',u.status || 'Aktif',hashPassword_(u.password),'',formatDate_(new Date()),menuAkses]);
+  sheet.appendRow([id, neutralizeFormula_(u.nama), neutralizeFormula_(u.email), neutralizeFormula_(u.noHp || ''), u.role || 'Editor', neutralizeFormula_(u.wilayah || 'RW026'), u.status || 'Aktif', hashPassword_(u.password), '', formatDate_(new Date()), menuAkses]);
   logActivity_(actor, 'create', 'users', 'Menambah pengguna ' + u.nama);
+  invalidateData_('users');
   return json_({ok:true, message:'Pengguna berhasil ditambahkan.', userId:id});
 }
 
@@ -292,8 +369,9 @@ function updateUser_(body) {
   if (actor.role !== 'Super Admin' && u.role === 'Super Admin') throw new Error('Hanya Super Admin yang dapat mengubah role ke Super Admin.');
   const passwordHash = u.password ? hashPassword_(u.password) : current[7];
   const menuAkses = u.role === 'Editor' ? JSON.stringify(u.menuAkses || JSON.parse(current[10] || '[]')) : (current[10] || '[]');
-  sheet.getRange(found.row,1,1,11).setValues([[current[0],u.nama || current[1],u.email || current[2],u.noHp || '',u.role || current[4],u.wilayah || current[5],u.status || current[6],passwordHash,current[8],current[9],menuAkses]]);
+  sheet.getRange(found.row,1,1,11).setValues([[current[0], neutralizeFormula_(u.nama || current[1]), neutralizeFormula_(u.email || current[2]), neutralizeFormula_(u.noHp || ''), u.role || current[4], neutralizeFormula_(u.wilayah || current[5]), u.status || current[6], passwordHash, current[8], current[9], menuAkses]]);
   logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + (u.nama || current[1]));
+  invalidateData_('users');
   return json_({ok:true, message:'Data pengguna diperbarui.'});
 }
 
@@ -305,6 +383,7 @@ function toggleUser_(body) {
   const status = String(found.values[6]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getSheet_().getRange(found.row,7).setValue(status);
   logActivity_(actor, 'toggle', 'users', 'Mengubah status ' + found.values[1] + ' ke ' + status);
+  invalidateData_('users');
   return json_({ok:true, status:status});
 }
 
@@ -315,6 +394,7 @@ function deleteUser_(body) {
   if (actor.role !== 'Super Admin' && found.values[4] === 'Super Admin') throw new Error('Anda tidak memiliki izin untuk menghapus Super Admin.');
   getSheet_().deleteRow(found.row);
   logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + found.values[1]);
+  invalidateData_('users');
   return json_({ok:true, message:'Pengguna berhasil dihapus.'});
 }
 
@@ -327,12 +407,8 @@ function updateMyProfile_(body) {
   if (!found) throw new Error('Pengguna tidak ditemukan.');
   const current = found.values;
   const storedHash = String(current[7] || '');
-  const currentHash = hashPassword_(profile.currentPassword);
-  if (storedHash !== currentHash && storedHash !== profile.currentPassword) {
+  if (!verifyPassword_(profile.currentPassword, storedHash)) {
     throw new Error('Password saat ini salah.');
-  }
-  if (storedHash === profile.currentPassword) {
-    getSheet_().getRange(found.row, 8).setValue(currentHash);
   }
   const rows = getRows_(getSheet_());
   const emailExists = rows.some(r => String(r[0]) !== user.userId && String(r[2]).toLowerCase() === String(profile.email).toLowerCase());
@@ -351,6 +427,7 @@ function updateMyProfile_(body) {
   updatedUser.noHp = profile.noHp || '';
   CacheService.getScriptCache().put('session_' + body.token, JSON.stringify(updatedUser), SESSION_SECONDS);
   logActivity_(user, 'update', 'profil', user.nama + ' memperbarui profil sendiri');
+  invalidateData_('users');
   return json_({ok: true, message: 'Profil berhasil diperbarui.', user: updatedUser});
 }
 
@@ -401,20 +478,16 @@ function resetPassword_(body) {
   const found = findUserRow_(data.userId);
   if (!found) throw new Error('Pengguna tidak ditemukan.');
   const newHash = hashPassword_(newPassword);
-  const storedHash = String(found.values[7] || '');
-  if (storedHash === newPassword) {
-    getSheet_().getRange(found.row, 8).setValue(newHash);
-  } else {
-    getSheet_().getRange(found.row, 8).setValue(newHash);
-  }
+  getSheet_().getRange(found.row, 8).setValue(newHash);
   CacheService.getScriptCache().remove('reset_' + token);
   logActivity_({userId: data.userId, nama: data.nama, role: found.values[4] || ''}, 'update', 'auth', data.nama + ' berhasil reset password');
+  invalidateData_('users');
   return json_({ok: true, message: 'Password berhasil diubah. Silakan login dengan password baru.'});
 }
 
 function listHimbauan_(body) {
   requireSession_(body.token);
-  return json_({ok:true, himbauan:getHimbauanRows_().map(himbauanRowToObject_)});
+  return json_({ok:true, himbauan:cachedData_('list_himbauan', DATA_CACHE_TTL, function(){ return getHimbauanRows_().map(himbauanRowToObject_); })});
 }
 
 function createHimbauan_(body) {
@@ -433,8 +506,9 @@ function createHimbauan_(body) {
   const rows = getHimbauanRows_().map(r => r.values);
   const id = nextId_(rows, '');
   const driveUrl = 'https://drive.google.com/file/d/' + file.getId() + '/view?usp=drive_link';
-  getHimbauanSheet_().appendRow([id,item.judul,item.kategori,'=HYPERLINK("' + driveUrl + '";"' + String(item.judul).replace(/"/g,'""') + '")',item.status || 'Aktif']);
+  getHimbauanSheet_().appendRow([id, neutralizeFormula_(item.judul), neutralizeFormula_(item.kategori), '=HYPERLINK("' + driveUrl + '";"' + String(item.judul).replace(/"/g,'""') + '")', item.status || 'Aktif']);
   logActivity_(requireSession_(body.token), 'create', 'himbauan', 'Menambah himbauan "' + item.judul + '"');
+  invalidateData_('himbauan');
   return json_({ok:true, message:'Himbauan berhasil disimpan.', id:id});
 }
 
@@ -444,6 +518,7 @@ function toggleHimbauan_(body) {
   const status = String(found.values[4]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getHimbauanSheet_().getRange(found.row,5).setValue(status);
   logActivity_(requireSession_(body.token), 'toggle', 'himbauan', 'Mengubah status himbauan "' + found.values[1] + '" ke ' + status);
+  invalidateData_('himbauan');
   return json_({ok:true, status:status});
 }
 
@@ -454,12 +529,13 @@ function deleteHimbauan_(body) {
   if (object.fileId) DriveApp.getFileById(object.fileId).setTrashed(true);
   getHimbauanSheet_().deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'himbauan', 'Menghapus himbauan "' + found.values[1] + '"');
+  invalidateData_('himbauan');
   return json_({ok:true, message:'Himbauan berhasil dihapus.'});
 }
 
 function listAnnouncements_(body) {
   requireSession_(body.token);
-  return json_({ok:true, announcements:getTableRows_(getInfoSheet_(), 6).map(announcementRowToObject_)});
+  return json_({ok:true, announcements:cachedData_('list_announcements', DATA_CACHE_TTL, function(){ return getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_); })});
 }
 
 function createAnnouncement_(body) {
@@ -468,8 +544,9 @@ function createAnnouncement_(body) {
   if (!item.judul || !item.kategori || !item.ringkasan) throw new Error('Judul, kategori, dan ringkasan wajib diisi.');
   const sheet = getInfoSheet_();
   const id = nextId_(getTableRows_(sheet, 6).map(r => r.values), 'INF-');
-  sheet.appendRow([id,item.judul,item.kategori,item.ringkasan,item.tanggal || today_(),item.status || 'Aktif']);
+  sheet.appendRow([id, neutralizeFormula_(item.judul), neutralizeFormula_(item.kategori), sanitizeHtml_(item.ringkasan), item.tanggal || today_(), item.status || 'Aktif']);
   logActivity_(requireSession_(body.token), 'create', 'pengumuman', 'Menambah pengumuman "' + item.judul + '"');
+  invalidateData_('pengumuman');
   return json_({ok:true, id:id});
 }
 
@@ -477,8 +554,9 @@ function updateAnnouncement_(body) {
   requireMenuAccess_(body.token, 'pengumuman');
   const item = body.announcement || {}, found = findTableRow_(getInfoSheet_(), item.id, 6);
   if (!found) throw new Error('Pengumuman tidak ditemukan.');
-  getInfoSheet_().getRange(found.row,1,1,6).setValues([[found.values[0],item.judul,item.kategori,item.ringkasan,item.tanggal,item.status]]);
+  getInfoSheet_().getRange(found.row,1,1,6).setValues([[found.values[0], neutralizeFormula_(item.judul), neutralizeFormula_(item.kategori), sanitizeHtml_(item.ringkasan), item.tanggal, item.status]]);
   logActivity_(requireSession_(body.token), 'update', 'pengumuman', 'Memperbarui pengumuman "' + item.judul + '"');
+  invalidateData_('pengumuman');
   return json_({ok:true});
 }
 
@@ -489,6 +567,7 @@ function toggleAnnouncement_(body) {
   const status = String(found.values[5]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getInfoSheet_().getRange(found.row,6).setValue(status);
   logActivity_(requireSession_(body.token), 'toggle', 'pengumuman', 'Mengubah status pengumuman "' + found.values[1] + '" ke ' + status);
+  invalidateData_('pengumuman');
   return json_({ok:true, status:status});
 }
 
@@ -498,12 +577,13 @@ function deleteAnnouncement_(body) {
   if (!found) throw new Error('Pengumuman tidak ditemukan.');
   getInfoSheet_().deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'pengumuman', 'Menghapus pengumuman "' + found.values[1] + '"');
+  invalidateData_('pengumuman');
   return json_({ok:true});
 }
 
 function listNews_(body) {
   requireSession_(body.token);
-  return json_({ok:true, news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_)});
+  return json_({ok:true, news:cachedData_('list_news', DATA_CACHE_TTL, function(){ return getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_); })});
 }
 
 function createNews_(body) {
@@ -513,8 +593,9 @@ function createNews_(body) {
   const sheet = getNewsSheet_();
   const id = nextId_(getTableRows_(sheet, 7).map(r => r.values), 'BRT-');
   const foto = saveDriveImage_(item, NEWS_DRIVE_FOLDER_ID, item.judul);
-  sheet.appendRow([id,item.judul,item.category,item.isi,item.tanggal || today_(),foto,item.status || 'Aktif']);
+  sheet.appendRow([id, neutralizeFormula_(item.judul), neutralizeFormula_(item.category), sanitizeHtml_(item.isi), item.tanggal || today_(), foto, item.status || 'Aktif']);
   logActivity_(requireSession_(body.token), 'create', 'berita', 'Menambah berita "' + item.judul + '"');
+  invalidateData_('berita');
   return json_({ok:true, id:id});
 }
 
@@ -523,8 +604,9 @@ function updateNews_(body) {
   const item = body.news || {}, found = findTableRow_(getNewsSheet_(), item.id, 7);
   if (!found) throw new Error('Berita tidak ditemukan.');
   const foto = saveDriveImage_(item, NEWS_DRIVE_FOLDER_ID, item.judul) || item.foto || found.values[5] || '';
-  getNewsSheet_().getRange(found.row,1,1,7).setValues([[found.values[0],item.judul,item.category,item.isi,item.tanggal,foto,item.status]]);
+  getNewsSheet_().getRange(found.row,1,1,7).setValues([[found.values[0], neutralizeFormula_(item.judul), neutralizeFormula_(item.category), sanitizeHtml_(item.isi), item.tanggal, foto, item.status]]);
   logActivity_(requireSession_(body.token), 'update', 'berita', 'Memperbarui berita "' + item.judul + '"');
+  invalidateData_('berita');
   return json_({ok:true});
 }
 
@@ -535,6 +617,7 @@ function toggleNews_(body) {
   const status = String(found.values[6]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getNewsSheet_().getRange(found.row,7).setValue(status);
   logActivity_(requireSession_(body.token), 'toggle', 'berita', 'Mengubah status berita "' + found.values[1] + '" ke ' + status);
+  invalidateData_('berita');
   return json_({ok:true, status:status});
 }
 
@@ -544,12 +627,13 @@ function deleteNews_(body) {
   if (!found) throw new Error('Berita tidak ditemukan.');
   getNewsSheet_().deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'berita', 'Menghapus berita "' + found.values[1] + '"');
+  invalidateData_('berita');
   return json_({ok:true});
 }
 
 function listFacilities_(body) {
   requireSession_(body.token);
-  return json_({ok:true, facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_)});
+  return json_({ok:true, facilities:cachedData_('list_facilities', DATA_CACHE_TTL, function(){ return getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_); })});
 }
 
 function createFacility_(body) {
@@ -559,8 +643,9 @@ function createFacility_(body) {
   const sheet = getFacilitySheet_();
   const id = nextId_(getTableRows_(sheet, 5).map(r => r.values), 'FAS-');
   const foto = saveDriveImage_(item, FASUM_DRIVE_FOLDER_ID, item.nama);
-  sheet.appendRow([id,item.nama,item.deskripsi,foto,item.maps || '']);
+  sheet.appendRow([id, neutralizeFormula_(item.nama), neutralizeFormula_(item.deskripsi), foto, neutralizeFormula_(item.maps || '')]);
   logActivity_(requireSession_(body.token), 'create', 'fasilitas', 'Menambah fasilitas "' + item.nama + '"');
+  invalidateData_('fasilitas');
   return json_({ok:true, id:id});
 }
 
@@ -569,8 +654,9 @@ function updateFacility_(body) {
   const item = body.facility || {}, found = findTableRow_(getFacilitySheet_(), item.id, 5);
   if (!found) throw new Error('Fasilitas tidak ditemukan.');
   const foto = saveDriveImage_(item, FASUM_DRIVE_FOLDER_ID, item.nama) || item.foto || found.values[3] || '';
-  getFacilitySheet_().getRange(found.row,1,1,5).setValues([[found.values[0],item.nama,item.deskripsi,foto,item.maps || '']]);
+  getFacilitySheet_().getRange(found.row,1,1,5).setValues([[found.values[0], neutralizeFormula_(item.nama), neutralizeFormula_(item.deskripsi), foto, neutralizeFormula_(item.maps || '')]]);
   logActivity_(requireSession_(body.token), 'update', 'fasilitas', 'Memperbarui fasilitas "' + item.nama + '"');
+  invalidateData_('fasilitas');
   return json_({ok:true});
 }
 
@@ -580,13 +666,17 @@ function deleteFacility_(body) {
   if (!found) throw new Error('Fasilitas tidak ditemukan.');
   getFacilitySheet_().deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'fasilitas', 'Menghapus fasilitas "' + found.values[1] + '"');
+  invalidateData_('fasilitas');
   return json_({ok:true});
 }
 
 function listOrganization_(body) {
   requireSession_(body.token);
-  const groups = {};
-  ORG_SHEET_NAMES.forEach(name => groups[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r)));
+  const groups = cachedData_('list_organization', DATA_CACHE_TTL, function () {
+    const g = {};
+    ORG_SHEET_NAMES.forEach(name => g[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r)));
+    return g;
+  });
   return json_({ok:true, organization:groups});
 }
 
@@ -597,8 +687,9 @@ function createOrgMember_(body) {
   const sheet = getOrgSheet_(group);
   const id = nextId_(getTableRows_(sheet, 4).map(r => r.values), 'ORG-');
   const foto = saveDriveImage_(item, ORG_DRIVE_FOLDER_ID, item.nama);
-  sheet.appendRow([id,item.jabatan,item.nama,foto]);
+  sheet.appendRow([id, neutralizeFormula_(item.jabatan), neutralizeFormula_(item.nama), foto]);
   logActivity_(requireSession_(body.token), 'create', 'organisasi', 'Menambah pengurus ' + item.nama + ' (' + item.jabatan + ')');
+  invalidateData_('organisasi');
   return json_({ok:true, id:id});
 }
 
@@ -607,8 +698,9 @@ function updateOrgMember_(body) {
   const item = body.member || {}, group = validateOrgGroup_(item.group), found = findTableRow_(getOrgSheet_(group), item.id, 4);
   if (!found) throw new Error('Data pengurus tidak ditemukan.');
   const foto = saveDriveImage_(item, ORG_DRIVE_FOLDER_ID, item.nama) || item.foto || found.values[3] || '';
-  getOrgSheet_(group).getRange(found.row,1,1,4).setValues([[found.values[0],item.jabatan,item.nama,foto]]);
+  getOrgSheet_(group).getRange(found.row,1,1,4).setValues([[found.values[0], neutralizeFormula_(item.jabatan), neutralizeFormula_(item.nama), foto]]);
   logActivity_(requireSession_(body.token), 'update', 'organisasi', 'Memperbarui pengurus ' + item.nama);
+  invalidateData_('organisasi');
   return json_({ok:true});
 }
 
@@ -618,33 +710,55 @@ function deleteOrgMember_(body) {
   if (!found) throw new Error('Data pengurus tidak ditemukan.');
   getOrgSheet_(group).deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'organisasi', 'Menghapus pengurus ' + found.values[2]);
+  invalidateData_('organisasi');
   return json_({ok:true});
 }
 
 function listGalleryAlbums_(body) {
   requireSession_(body.token);
-  const rows = getGalleryRows_();
-  const albums = rows.map(galleryRowToObject_);
-  for (let i = 0; i < albums.length; i++) {
-    if (albums[i].folderId) {
-      try {
-        const folder = DriveApp.getFolderById(albums[i].folderId);
-        const files = folder.getFiles();
-        let count = 0, firstFile = null;
-        while (files.hasNext()) {
-          const f = files.next();
-          if (count === 0) firstFile = f;
-          count++;
+  return json_({ ok: true, albums: galleryAlbumsWithCounts_() });
+}
+
+function galleryAlbumsWithCounts_() {
+  return cachedData_('list_gallery_albums', GALLERY_CACHE_TTL, function () {
+    const rows = getGalleryRows_();
+    const albums = rows.map(galleryRowToObject_);
+    const sheet = getGallerySheet_();
+    const backfill = [];
+    for (let i = 0; i < albums.length; i++) {
+      const album = albums[i];
+      album.photoCount = album.photoCountStored || 0;
+      album.thumbnailUrl = '';
+      if (!album.folderId) continue;
+      if (album.photoCountStored === null) {
+        try {
+          const folder = DriveApp.getFolderById(album.folderId);
+          const files = folder.getFiles();
+          let count = 0, firstFile = null;
+          while (files.hasNext()) {
+            const f = files.next();
+            if (count === 0) firstFile = f;
+            count++;
+          }
+          album.photoCount = count;
+          if (firstFile) album.thumbnailId = firstFile.getId();
+          backfill.push({ row: rows[i].row, count: count, thumbnailId: album.thumbnailId });
+        } catch (e) {
+          album.photoCount = 0;
+          album.thumbnailUrl = '';
+          continue;
         }
-        albums[i].photoCount = count;
-        albums[i].thumbnailUrl = firstFile ? 'https://drive.google.com/thumbnail?id=' + firstFile.getId() + '&sz=w400' : '';
-      } catch (e) {
-        albums[i].photoCount = 0;
-        albums[i].thumbnailUrl = '';
       }
+      album.thumbnailUrl = album.thumbnailId ? 'https://drive.google.com/thumbnail?id=' + album.thumbnailId + '&sz=w400' : '';
     }
-  }
-  return json_({ ok: true, albums: albums });
+    backfill.forEach(function (b) {
+      try {
+        sheet.getRange(b.row, 7).setValue(b.count || 0);
+        if (b.thumbnailId) sheet.getRange(b.row, 8).setValue(b.thumbnailId);
+      } catch (e) {}
+    });
+    return albums;
+  });
 }
 
 function createGalleryAlbum_(body) {
@@ -655,7 +769,8 @@ function createGalleryAlbum_(body) {
   const subFolder = parentFolder.createFolder(sanitizeFileName_(item.nama));
   const sheet = getGallerySheet_();
   const id = nextId_(getGalleryRows_().map(r => r.values), 'GAL-');
-  sheet.appendRow([id, item.nama, item.deskripsi || '', subFolder.getId(), today_(), item.status || 'Aktif']);
+  sheet.appendRow([id, neutralizeFormula_(item.nama), neutralizeFormula_(item.deskripsi || ''), subFolder.getId(), today_(), item.status || 'Aktif', 0, '']);
+  invalidateData_('galeri');
   return json_({ ok: true, message: 'Album berhasil dibuat.', id: id, folderId: subFolder.getId() });
 }
 
@@ -668,6 +783,7 @@ function deleteGalleryAlbum_(body) {
     try { DriveApp.getFolderById(album.folderId).setTrashed(true); } catch (e) {}
   }
   getGallerySheet_().deleteRow(found.row);
+  invalidateData_('galeri');
   return json_({ ok: true, message: 'Album berhasil dihapus.' });
 }
 
@@ -707,13 +823,43 @@ function uploadGalleryPhoto_(body) {
   const blob = Utilities.newBlob(Utilities.base64Decode(match[2]), match[1], safeName);
   const file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const albumRows = getGalleryRows_();
+  const idx = albumRows.findIndex(r => String(r.values[3]) === String(body.folderId));
+  if (idx >= 0) {
+    try {
+      const sheet = getGallerySheet_();
+      const rowNum = albumRows[idx].row;
+      const cur = parseInt(albumRows[idx].values[6] || '0', 10) + 1;
+      sheet.getRange(rowNum, 7).setValue(cur);
+      if (!String(albumRows[idx].values[7] || '')) sheet.getRange(rowNum, 8).setValue(file.getId());
+    } catch (e) {}
+  }
+  invalidateData_('galeri');
   return json_({ ok: true, message: 'Foto berhasil diupload.', fileId: file.getId(), url: file.getUrl() });
 }
 
 function deleteGalleryPhoto_(body) {
   requireMenuAccess_(body.token, 'galeri');
   if (!body.fileId) throw new Error('File ID wajib diisi.');
+  let parentFolderId = '';
+  try {
+    const parents = DriveApp.getFileById(body.fileId).getParents();
+    if (parents.hasNext()) parentFolderId = parents.next().getId();
+  } catch (e) {}
   try { DriveApp.getFileById(body.fileId).setTrashed(true); } catch (e) {}
+  if (parentFolderId) {
+    const albumRows = getGalleryRows_();
+    const idx = albumRows.findIndex(r => String(r.values[3]) === parentFolderId);
+    if (idx >= 0) {
+      try {
+        const sheet = getGallerySheet_();
+        const rowNum = albumRows[idx].row;
+        const cur = Math.max(0, parseInt(albumRows[idx].values[6] || '0', 10) - 1);
+        sheet.getRange(rowNum, 7).setValue(cur);
+      } catch (e) {}
+    }
+  }
+  invalidateData_('galeri');
   return json_({ ok: true, message: 'Foto berhasil dihapus.' });
 }
 
@@ -722,7 +868,8 @@ function getGallerySheet_() { return openSheet_(GALLERY_SPREADSHEET_ID, GALLERY_
 function getGalleryRows_() {
   const sheet = getGallerySheet_(), last = sheet.getLastRow();
   if (last < 2) return [];
-  const values = sheet.getRange(2, 1, last - 1, 6).getDisplayValues();
+  const width = Math.max(6, Math.min(8, sheet.getLastColumn()));
+  const values = sheet.getRange(2, 1, last - 1, width).getDisplayValues();
   return values.map((v, i) => ({ row: i + 2, values: v })).filter(r => r.values[0]);
 }
 
@@ -733,13 +880,16 @@ function findGalleryRow_(id) {
 
 function galleryRowToObject_(row) {
   const v = row.values;
+  const countRaw = v[6];
   return {
     id: v[0],
     nama: v[1],
     deskripsi: v[2],
     folderId: v[3],
     tanggal: v[4],
-    status: v[5]
+    status: v[5],
+    photoCountStored: (countRaw !== undefined && countRaw !== '') ? parseInt(countRaw, 10) : null,
+    thumbnailId: v[7] !== undefined ? String(v[7] || '') : ''
   };
 }
 
@@ -748,19 +898,20 @@ function getKasSheet_() { return openSheet_(KAS_SPREADSHEET_ID, KAS_SHEET_NAME);
 function getKasRows_() {
   const sheet = getKasSheet_(), last = sheet.getLastRow();
   if (last < 2) return [];
-  const values = sheet.getRange(2, 1, last - 1, 14).getValues();
-  const formulas = sheet.getRange(2, 1, last - 1, 14).getFormulas();
-  return values.map((v, i) => ({ row: i + 2, values: v, formulas: formulas[i] })).filter(r => r.values[0]);
+  const range = sheet.getRange(2, 1, last - 1, 15);
+  const values = range.getValues();
+  const formulas = range.getFormulas();
+  return values.map((v, i) => ({ row: i + 2, values: v, formula: formulas[i][10] })).filter(r => r.values[0]);
 }
 
 function kasRowToObject_(row) {
-  const v = row.values, f = row.formulas || [];
+  const v = row.values;
   let tglStr = v[2];
   if (tglStr instanceof Date) {
     const tz = Session.getScriptTimeZone();
     tglStr = Utilities.formatDate(tglStr, tz, 'dd/MM/yyyy');
   }
-  const linkRaw = String(f[10] || v[10] || '');
+  const linkRaw = String(row.formula || v[10] || '');
   const m = linkRaw.match(/HYPERLINK\("([^"]+)"/i);
   const fileUrl = m ? m[1] : (linkRaw.match(/https?:\/\/[^",\s)]+/) || [''])[0];
   const fileId = extractFileId_(fileUrl);
@@ -779,20 +930,26 @@ function kasRowToObject_(row) {
     imageUrl: imageUrl,
     status: String(v[11] || 'Menunggu'),
     createdBy: String(v[12] || ''),
-    approvedBy: String(v[13] || '')
+    approvedBy: String(v[13] || ''),
+    alasanDitolak: String(v[14] || '')
   };
+}
+
+function kasTimestamp_(tanggal) {
+  const parts = String(tanggal).split('/');
+  return parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]).getTime() : 0;
 }
 
 function listKas_(body) {
   var session = requireSession_(body.token);
-  const allRows = getKasRows_().map(kasRowToObject_).sort((a, b) => {
-    const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
-    return p(b.tanggal) - p(a.tanggal);
+  const allRows = cachedData_('list_kas', DATA_CACHE_TTL, function () {
+    return getKasRows_().map(kasRowToObject_).sort((a, b) => kasTimestamp_(b.tanggal) - kasTimestamp_(a.tanggal));
   });
   const total = allRows.length;
-  const page = Math.max(1, parseInt(body.page, 10) || 1);
   const perPage = Math.max(1, Math.min(50, parseInt(body.perPage, 10) || 10));
   const totalPages = Math.ceil(total / perPage) || 1;
+  const requestedPage = Math.max(1, parseInt(body.page, 10) || 1);
+  const page = Math.min(requestedPage, totalPages);
   const start = (page - 1) * perPage;
   const data = allRows.slice(start, start + perPage);
   return json_({ ok: true, data, total, page, perPage, totalPages, userRole: session.role, userId: session.userId, userNama: session.nama });
@@ -824,12 +981,12 @@ function createKas_(body) {
   sheet.getRange(nextRow, 1).setValue('=ROW()-1');
   sheet.getRange(nextRow, 2).setValue(new Date());
   sheet.getRange(nextRow, 3).setValue(item.tanggal);
-  sheet.getRange(nextRow, 4).setValue(item.uraian);
+  sheet.getRange(nextRow, 4).setValue(neutralizeFormula_(item.uraian));
   sheet.getRange(nextRow, 5).setValue('-');
   sheet.getRange(nextRow, 6).setValue(item.metode || 'Tunai');
   sheet.getRange(nextRow, 7).setValue(masuk);
   sheet.getRange(nextRow, 8).setValue(keluar);
-  sheet.getRange(nextRow, 9).setValue(item.keterangan || '-');
+  sheet.getRange(nextRow, 9).setValue(neutralizeFormula_(item.keterangan || '-'));
   if (nextRow === 2) {
     sheet.getRange(nextRow, 10).setFormula('=IF(L2="Disetujui";G2-H2;0)');
   } else {
@@ -840,6 +997,7 @@ function createKas_(body) {
   sheet.getRange(nextRow, 13).setValue(session.nama);
 
   logActivity_(session, 'create', 'kas', 'Menambah transaksi "' + item.uraian + '" (' + item.jenis_form + ' Rp' + parseInt(item.nominal, 10).toLocaleString('id-ID') + ')');
+  invalidateData_('kas');
   return json_({ ok: true, message: 'Transaksi berhasil disimpan. Menunggu persetujuan admin.' });
 }
 
@@ -849,6 +1007,13 @@ function updateKas_(body) {
   const targetRow = parseInt(item.rowNum, 10);
   if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
   const sheet = getKasSheet_();
+
+  if (!['Super Admin', 'Admin'].includes(session.role)) {
+    const currentStatus = String(sheet.getRange(targetRow, 12).getValue() || 'Menunggu');
+    const currentCreator = String(sheet.getRange(targetRow, 13).getValue() || '');
+    if (currentStatus !== 'Menunggu' && currentStatus !== 'Ditolak') throw new Error('Anda hanya bisa mengedit transaksi berstatus Menunggu atau Ditolak.');
+    if (currentCreator !== session.nama) throw new Error('Anda hanya bisa mengedit transaksi milik Anda sendiri.');
+  }
 
   if (item.fileData && item.fileData.includes(',')) {
     const rangeFoto = sheet.getRange(targetRow, 11);
@@ -875,7 +1040,7 @@ function updateKas_(body) {
 
   sheet.getRange(targetRow, 2).setValue(new Date());
   sheet.getRange(targetRow, 3).setValue(item.tanggal);
-  sheet.getRange(targetRow, 4).setValue(item.uraian);
+  sheet.getRange(targetRow, 4).setValue(neutralizeFormula_(item.uraian));
   sheet.getRange(targetRow, 5).setValue('-');
   sheet.getRange(targetRow, 6).setValue(item.metode || 'Tunai');
   if (item.jenis_form === 'masuk') {
@@ -885,14 +1050,19 @@ function updateKas_(body) {
     sheet.getRange(targetRow, 7).setValue(0);
     sheet.getRange(targetRow, 8).setValue(parseInt(item.nominal, 10));
   }
-  sheet.getRange(targetRow, 9).setValue(item.keterangan || '-');
+  sheet.getRange(targetRow, 9).setValue(neutralizeFormula_(item.keterangan || '-'));
 
   if (item.status === 'Menunggu') {
+    const currentStatus = String(sheet.getRange(targetRow, 12).getValue() || 'Menunggu');
+    if (currentStatus !== 'Menunggu' && currentStatus !== 'Ditolak') throw new Error('Status transaksi tidak dapat diubah ke Menunggu.');
     sheet.getRange(targetRow, 12).setValue('Menunggu');
+    sheet.getRange(targetRow, 14).setValue('');
+    sheet.getRange(targetRow, 15).setValue('');
   }
 
   updateKasBalances_(sheet, targetRow);
   logActivity_(session, 'update', 'kas', 'Memperbarui transaksi "' + item.uraian + '"');
+  invalidateData_('kas');
   return json_({ ok: true, message: 'Transaksi berhasil diperbarui.' });
 }
 
@@ -924,6 +1094,7 @@ function deleteKas_(body) {
   sheet.deleteRow(targetRow);
   updateKasBalances_(sheet, targetRow);
   logActivity_(session, 'delete', 'kas', 'Menghapus transaksi pada baris ' + targetRow);
+  invalidateData_('kas');
   return json_({ ok: true, message: 'Transaksi berhasil dihapus.' });
 }
 
@@ -950,6 +1121,7 @@ function approveKas_(body) {
   sheet.getRange(targetRow, 14).setValue(session.nama);
   updateKasBalances_(sheet, targetRow);
   logActivity_(session, 'approve', 'kas', 'Menyetujui transaksi pada baris ' + targetRow);
+  invalidateData_('kas');
   return json_({ ok: true, message: 'Transaksi berhasil disetujui.' });
 }
 
@@ -958,54 +1130,30 @@ function rejectKas_(body) {
   if (!['Super Admin', 'Admin'].includes(session.role)) throw new Error('Hanya Admin atau Super Admin yang dapat menolak transaksi.');
   var targetRow = parseInt(body.rowNum, 10);
   if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
+  var alasan = (body.alasan || '').trim();
+  if (!alasan) throw new Error('Alasan penolakan wajib diisi.');
   var sheet = getKasSheet_();
   var currentStatus = String(sheet.getRange(targetRow, 12).getValue() || '');
   if (currentStatus !== 'Menunggu') throw new Error('Hanya transaksi berstatus Menunggu yang dapat ditolak.');
   sheet.getRange(targetRow, 12).setValue('Ditolak');
   sheet.getRange(targetRow, 14).setValue('');
+  sheet.getRange(targetRow, 15).setValue(alasan);
   updateKasBalances_(sheet, targetRow);
   logActivity_(session, 'reject', 'kas', 'Menolak transaksi pada baris ' + targetRow);
+  invalidateData_('kas');
   return json_({ ok: true, message: 'Transaksi berhasil ditolak.' });
 }
 
 function getKasReport_(body) {
   requireSession_(body.token);
   try {
-    const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
-    let saldoAwal = 0, totalMasuk = 0, totalKeluar = 0, rincianMasuk = [], rincianKeluar = [];
-    if (lastRow < 2) return json_({ ok: true, saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [] });
-    const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
     const targetBulan = parseInt(body.bulan, 10), targetTahun = parseInt(body.tahun, 10);
-    const tz = Session.getScriptTimeZone();
-    data.forEach(row => {
-      const status = String(row[11] || 'Menunggu');
-      if (status !== 'Disetujui') return;
-      const tglRaw = row[2];
-      if (!tglRaw) return;
-      let d = null;
-      if (tglRaw instanceof Date) { d = tglRaw; }
-      else if (typeof tglRaw === 'string') {
-        const parts = tglRaw.split('/');
-        if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
-      }
-      if (d) {
-        const m = d.getMonth(), y = d.getFullYear();
-        const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
-        if (y < targetTahun || (y === targetTahun && m < targetBulan)) { saldoAwal += masuk - keluar; }
-        else if (m === targetBulan && y === targetTahun) {
-          if (masuk > 0) { totalMasuk += masuk; rincianMasuk.push({ tanggal: Utilities.formatDate(d, tz, 'dd/MM/yyyy'), uraian: row[3], nominal: masuk }); }
-          if (keluar > 0) { totalKeluar += keluar; rincianKeluar.push({ tanggal: Utilities.formatDate(d, tz, 'dd/MM/yyyy'), uraian: row[3], nominal: keluar }); }
-        }
-      }
+    const key = versionedKey_('kas', 'report_' + targetTahun + '_' + targetBulan);
+    const data = cachedData_(key, DATA_CACHE_TTL, function () {
+      const r = kasReportData_(targetBulan, targetTahun);
+      return { saldoAwal: r.saldoAwal, totalMasuk: r.totalMasuk, totalKeluar: r.totalKeluar, saldoAkhir: r.saldoAkhir, rincianMasuk: r.rincianMasuk, rincianKeluar: r.rincianKeluar };
     });
-    const sortByDateAsc = (a, b) => {
-      const p = s => { const pp = String(s).split('/'); return pp.length === 3 ? new Date(pp[2], pp[1]-1, pp[0]).getTime() : 0; };
-      return p(a.tanggal) - p(b.tanggal);
-    };
-    rincianMasuk.sort(sortByDateAsc);
-    rincianKeluar.sort(sortByDateAsc);
-    const saldoAkhir = saldoAwal + totalMasuk - totalKeluar;
-    return json_({ ok: true, saldoAwal, totalMasuk, totalKeluar, saldoAkhir, rincianMasuk, rincianKeluar });
+    return json_({ ok: true, ...data });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
   }
@@ -1013,48 +1161,59 @@ function getKasReport_(body) {
 
 function getKasDashboard_(body) {
   var session = requireSession_(body.token);
-  try {
-    const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
-    if (lastRow < 2) return json_({ ok: true, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, jumlahTransaksi: 0, menungguCount: 0, ditolakCount: 0, notifications: [] });
-    const now = new Date();
-    const targetBulan = now.getMonth(), targetTahun = now.getFullYear();
-    const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
-    let totalMasuk = 0, totalKeluar = 0, jumlahTransaksi = 0, menungguCount = 0, ditolakCount = 0;
-    const userNama = session.nama;
-    const notifications = [];
-    data.forEach((row, idx) => {
-      const status = String(row[11] || 'Menunggu');
-      if (status === 'Menunggu') {
-        menungguCount++;
-        notifications.push({ type: 'menunggu', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
+  const key = versionedKey_('kas', 'dash_' + session.userId);
+  const data = cachedData_(key, DATA_CACHE_TTL, function () { return kasDashboardData_(session); });
+  return json_({ ok: true, ...data });
+}
+
+function kasDashboardData_(session) {
+  const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, jumlahTransaksi: 0, menungguCount: 0, ditolakCount: 0, notifications: [] };
+  const now = new Date();
+  const targetBulan = now.getMonth(), targetTahun = now.getFullYear();
+  const data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+  let totalMasuk = 0, totalKeluar = 0, jumlahTransaksi = 0, menungguCount = 0, ditolakCount = 0;
+  const userNama = session.nama;
+  const notifications = [];
+  data.forEach((row, idx) => {
+    const status = String(row[11] || 'Menunggu');
+    if (status === 'Menunggu') {
+      menungguCount++;
+      notifications.push({ type: 'menunggu', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
+    }
+    if (status === 'Ditolak' && String(row[12] || '') === userNama) {
+      ditolakCount++;
+      notifications.push({ type: 'ditolak', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
+    }
+    if (status !== 'Disetujui') return;
+    const tglRaw = row[2];
+    if (!tglRaw) return;
+    let d = null;
+    if (tglRaw instanceof Date) { d = tglRaw; }
+    else if (typeof tglRaw === 'string') {
+      const parts = tglRaw.split('/');
+      if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+    }
+    if (d) {
+      const m = d.getMonth(), y = d.getFullYear();
+      if (m === targetBulan && y === targetTahun) {
+        const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
+        if (masuk > 0) totalMasuk += masuk;
+        if (keluar > 0) totalKeluar += keluar;
+        if (masuk > 0 || keluar > 0) jumlahTransaksi++;
       }
-      if (status === 'Ditolak' && String(row[12] || '') === userNama) {
-        ditolakCount++;
-        notifications.push({ type: 'ditolak', uraian: String(row[3] || '-'), tanggal: String(row[2] || '-'), createdBy: String(row[12] || '-'), rowNum: idx + 2 });
-      }
-      if (status !== 'Disetujui') return;
-      const tglRaw = row[2];
-      if (!tglRaw) return;
-      let d = null;
-      if (tglRaw instanceof Date) { d = tglRaw; }
-      else if (typeof tglRaw === 'string') {
-        const parts = tglRaw.split('/');
-        if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
-      }
-      if (d) {
-        const m = d.getMonth(), y = d.getFullYear();
-        if (m === targetBulan && y === targetTahun) {
-          const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
-          if (masuk > 0) totalMasuk += masuk;
-          if (keluar > 0) totalKeluar += keluar;
-          if (masuk > 0 || keluar > 0) jumlahTransaksi++;
-        }
-      }
-    });
-    return json_({ ok: true, totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi, menungguCount, ditolakCount, notifications });
-  } catch (err) {
-    return json_({ ok: false, message: err.toString() });
-  }
+    }
+  });
+  return { totalMasuk, totalKeluar, saldoAkhir: totalMasuk - totalKeluar, jumlahTransaksi, menungguCount, ditolakCount, notifications };
+}
+
+function dashboardData_(body) {
+  const user = requireSession_(body.token);
+  const statistik = cachedData_('list_statistik', DATA_CACHE_TTL, function () { return getStatistikRows_().map(statistikRowToObject_); });
+  const announcements = cachedData_('list_announcements', DATA_CACHE_TTL, function () { return getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_); });
+  const news = cachedData_('list_news', DATA_CACHE_TTL, function () { return getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_); });
+  const kasDashboard = cachedData_(versionedKey_('kas', 'dash_' + user.userId), DATA_CACHE_TTL, function () { return kasDashboardData_(user); });
+  return json_({ ok: true, statistik: statistik, announcements: announcements, news: news, kasDashboard: kasDashboard });
 }
 
 function getKasCashFlow_(body) {
@@ -1062,44 +1221,47 @@ function getKasCashFlow_(body) {
   try {
     const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
     if (lastRow < 2) return json_({ ok: true, data: [] });
-    const data = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
     const bulanAwal = parseInt(body.bulanAwal, 10), tahunAwal = parseInt(body.tahunAwal, 10);
     const bulanAkhir = parseInt(body.bulanAkhir, 10), tahunAkhir = parseInt(body.tahunAkhir, 10);
-    const namaBulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-    const months = [];
-    let y = tahunAwal, m = bulanAwal;
-    while (y < tahunAkhir || (y === tahunAkhir && m <= bulanAkhir)) {
-      months.push({ bulan: m, tahun: y, label: namaBulan[m] + ' ' + y, masuk: 0, keluar: 0 });
-      m++;
-      if (m > 11) { m = 0; y++; }
-    }
-    let saldoAll = 0;
-    data.forEach(row => {
-      const status = String(row[11] || 'Menunggu');
-      if (status !== 'Disetujui') return;
-      const tglRaw = row[2];
-      if (!tglRaw) return;
-      let d = null;
-      if (tglRaw instanceof Date) { d = tglRaw; }
-      else if (typeof tglRaw === 'string') {
-        const parts = tglRaw.split('/');
-        if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+    const key = versionedKey_('kas', 'cf_' + tahunAwal + '_' + bulanAwal + '_' + tahunAkhir + '_' + bulanAkhir);
+    const data = cachedData_(key, DATA_CACHE_TTL, function () {
+      const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+      const namaBulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+      const months = [];
+      let y = tahunAwal, m = bulanAwal;
+      while (y < tahunAkhir || (y === tahunAkhir && m <= bulanAkhir)) {
+        months.push({ bulan: m, tahun: y, label: namaBulan[m] + ' ' + y, masuk: 0, keluar: 0 });
+        m++;
+        if (m > 11) { m = 0; y++; }
       }
-      if (!d) return;
-      const dm = d.getMonth(), dy = d.getFullYear();
-      const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
-      if (dy < tahunAwal || (dy === tahunAwal && dm < bulanAwal)) {
-        saldoAll += masuk - keluar;
-      }
-      const found = months.find(x => x.bulan === dm && x.tahun === dy);
-      if (found) { found.masuk += masuk; found.keluar += keluar; }
+      let saldoAll = 0;
+      rows.forEach(row => {
+        const status = String(row[11] || 'Menunggu');
+        if (status !== 'Disetujui') return;
+        const tglRaw = row[2];
+        if (!tglRaw) return;
+        let d = null;
+        if (tglRaw instanceof Date) { d = tglRaw; }
+        else if (typeof tglRaw === 'string') {
+          const parts = tglRaw.split('/');
+          if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+        if (!d) return;
+        const dm = d.getMonth(), dy = d.getFullYear();
+        const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
+        if (dy < tahunAwal || (dy === tahunAwal && dm < bulanAwal)) {
+          saldoAll += masuk - keluar;
+        }
+        const found = months.find(x => x.bulan === dm && x.tahun === dy);
+        if (found) { found.masuk += masuk; found.keluar += keluar; }
+      });
+      let saldo = saldoAll;
+      return months.map(x => {
+        saldo += x.masuk - x.keluar;
+        return { label: x.label, masuk: x.masuk, keluar: x.keluar, saldo: saldo };
+      });
     });
-    let saldo = saldoAll;
-    const result = months.map(x => {
-      saldo += x.masuk - x.keluar;
-      return { label: x.label, masuk: x.masuk, keluar: x.keluar, saldo: saldo };
-    });
-    return json_({ ok: true, data: result });
+    return json_({ ok: true, data: data });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
   }
@@ -1127,7 +1289,7 @@ function statistikRowToObject_(row) {
 
 function listStatistik_(body) {
   requireSession_(body.token);
-  return json_({ ok: true, data: getStatistikRows_().map(statistikRowToObject_) });
+  return json_({ ok: true, data: cachedData_('list_statistik', DATA_CACHE_TTL, function () { return getStatistikRows_().map(statistikRowToObject_); }) });
 }
 
 function createStatistik_(body) {
@@ -1137,8 +1299,9 @@ function createStatistik_(body) {
   const sheet = getStatistikSheet_();
   const rows = getStatistikRows_().map(r => r.values);
   const id = nextId_(rows, 'STT-');
-  sheet.appendRow([id, item.nama, Number(item.nilai) || 0, item.keterangan || '', formatDate_(new Date())]);
+  sheet.appendRow([id, neutralizeFormula_(item.nama), Number(item.nilai) || 0, neutralizeFormula_(item.keterangan || ''), formatDate_(new Date())]);
   logActivity_(requireSession_(body.token), 'create', 'statistik', 'Menambah kategori "' + item.nama + '"');
+  invalidateData_('statistik');
   return json_({ ok: true, message: 'Kategori berhasil ditambahkan.', id: id });
 }
 
@@ -1150,8 +1313,9 @@ function updateStatistik_(body) {
   const found = rows.find(r => String(r.values[0]) === String(item.id));
   if (!found) throw new Error('Kategori tidak ditemukan.');
   const sheet = getStatistikSheet_();
-  sheet.getRange(found.row, 1, 1, 5).setValues([[found.values[0], item.nama || found.values[1], Number(item.nilai) || found.values[2], item.keterangan !== undefined ? item.keterangan : found.values[3], formatDate_(new Date())]]);
+  sheet.getRange(found.row, 1, 1, 5).setValues([[found.values[0], neutralizeFormula_(item.nama || found.values[1]), Number(item.nilai) || found.values[2], neutralizeFormula_(item.keterangan !== undefined ? item.keterangan : found.values[3]), formatDate_(new Date())]]);
   logActivity_(requireSession_(body.token), 'update', 'statistik', 'Memperbarui kategori "' + (item.nama || found.values[1]) + '"');
+  invalidateData_('statistik');
   return json_({ ok: true, message: 'Kategori berhasil diperbarui.' });
 }
 
@@ -1163,6 +1327,7 @@ function deleteStatistik_(body) {
   if (!found) throw new Error('Kategori tidak ditemukan.');
   getStatistikSheet_().deleteRow(found.row);
   logActivity_(requireSession_(body.token), 'delete', 'statistik', 'Menghapus kategori "' + found.values[1] + '"');
+  invalidateData_('statistik');
   return json_({ ok: true, message: 'Kategori berhasil dihapus.' });
 }
 
@@ -1174,7 +1339,7 @@ function logActivity_(actor, action, module, description) {
     ensureHeader_(sheet, ACTIVITY_LOG_HEADERS);
     sheet.appendRow([formatDate_(new Date()), actor.nama || 'System', actor.role || '-', action, module, description]);
     const lastRow = sheet.getLastRow();
-    if (lastRow > 102) sheet.deleteRows(2, lastRow - 102);
+    if (lastRow > 202) sheet.deleteRows(2, lastRow - 102);
   } catch (e) {}
 }
 
@@ -1185,18 +1350,20 @@ function listActivity_(body) {
   const last = sheet.getLastRow();
   if (last < 2) return json_({ ok: true, data: [] });
   const limit = Math.min(20, Math.max(1, parseInt(body.limit, 10) || 10));
-  const totalRows = last - 1;
-  const startRow = Math.max(2, last - limit + 1);
-  const count = last - startRow + 1;
-  const values = sheet.getRange(startRow, 1, count, 6).getValues();
-  const data = values.reverse().map(r => ({
-    timestamp: String(r[0] || ''),
-    actor: String(r[1] || ''),
-    role: String(r[2] || ''),
-    action: String(r[3] || ''),
-    module: String(r[4] || ''),
-    description: String(r[5] || '')
-  }));
+  const data = cachedData_('list_activity_' + limit, 10, function () {
+    const totalRows = last - 1;
+    const startRow = Math.max(2, last - limit + 1);
+    const count = last - startRow + 1;
+    const values = sheet.getRange(startRow, 1, count, 6).getValues();
+    return values.reverse().map(r => ({
+      timestamp: String(r[0] || ''),
+      actor: String(r[1] || ''),
+      role: String(r[2] || ''),
+      action: String(r[3] || ''),
+      module: String(r[4] || ''),
+      description: String(r[5] || '')
+    }));
+  });
   return json_({ ok: true, data });
 }
 
@@ -1235,7 +1402,7 @@ function getNewsSheet_() { return openSheet_(INFO_SPREADSHEET_ID, NEWS_SHEET_NAM
 function getFacilitySheet_() { return openSheet_(FASUM_SPREADSHEET_ID, FASUM_SHEET_NAME); }
 function getOrgSheet_(name) { return openSheet_(ORG_SPREADSHEET_ID, name); }
 function openSheet_(spreadsheetId, sheetName) { const ss=SpreadsheetApp.openById(spreadsheetId); let sheet=ss.getSheetByName(sheetName); if(!sheet) sheet=ss.insertSheet(sheetName); return sheet; }
-function ensureHeader_(sheet, headers) { if (sheet.getLastRow() === 0) sheet.getRange(1,1,1,headers.length).setValues([headers]); sheet.setFrozenRows(1); sheet.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#d9ead3'); sheet.autoResizeColumns(1,headers.length); }
+function ensureHeader_(sheet, headers) { if (sheet.getLastRow() === 0) sheet.getRange(1,1,1,headers.length).setValues([headers]); if (sheet.getFrozenRows() === 1) return; sheet.setFrozenRows(1); sheet.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#d9ead3'); }
 function getRows_(sheet) { const last = sheet.getLastRow(); if (last < 2) return []; const cols = Math.min(11, sheet.getLastColumn()); return sheet.getRange(2,1,last-1,cols).getDisplayValues().filter(r => r[0]); }
 function findUserRow_(id) { const rows=getRows_(getSheet_()), index=rows.findIndex(r=>String(r[0])===String(id)); return index<0?null:{row:index+2,values:rows[index]}; }
 function rowToUser_(r) { return {userId:r[0],nama:r[1],email:r[2],noHp:r[3],role:r[4],wilayah:r[5],status:r[6],loginTerakhir:r[8] || '-',tanggalDibuat:r[9] || '-',menuAkses:r[10] || '[]'}; }
@@ -1243,7 +1410,7 @@ function nextUserId_(rows) { const max=rows.reduce((m,r)=>Math.max(m,parseInt(St
 function getHimbauanRows_() { const sheet=getHimbauanSheet_(), last=sheet.getLastRow(); if(last<2)return []; const values=sheet.getRange(2,1,last-1,5).getDisplayValues(); const formulas=sheet.getRange(2,1,last-1,5).getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas[i]})).filter(r=>r.values[0]); }
 function findHimbauanRow_(id) { const rows=getHimbauanRows_(), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
 function himbauanRowToObject_(row) { const v=row.values, formula=row.formulas ? row.formulas[3] : ''; const url=extractUrl_(formula || v[3]); const fileId=extractFileId_(url); return {id:v[0],judul:v[1],kategori:v[2],gambar:v[3],status:v[4],driveUrl:url,imageUrl:fileId?'https://drive.google.com/uc?export=view&id='+fileId:url,fileId:fileId}; }
-function getTableRows_(sheet, width) { const last=sheet.getLastRow(); if(last<2)return []; const range=sheet.getRange(2,1,last-1,width); const values=range.getDisplayValues(); const formulas=range.getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas[i]})).filter(r=>r.values[0]); }
+function getTableRows_(sheet, width, needFormulas) { const last=sheet.getLastRow(); if(last<2)return []; const range=sheet.getRange(2,1,last-1,width); const values=range.getDisplayValues(); const formulas = needFormulas === false ? null : range.getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas?formulas[i]:null})).filter(r=>r.values[0]); }
 function findTableRow_(sheet, id, width) { const rows=getTableRows_(sheet, width), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
 function announcementRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],kategori:v[2],ringkasan:v[3],tanggal:v[4],status:v[5]}; }
 function newsRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[5]) || v[5]); const fileId=extractFileId_(foto); return {id:v[0],judul:v[1],category:v[2],isi:v[3],tanggal:v[4],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,status:v[6]}; }
@@ -1256,7 +1423,48 @@ function saveDriveImage_(item, folderId, label) { if (!item.dataUrl) return ''; 
 function extractUrl_(value) { const text=String(value || ''); const formula=text.match(/HYPERLINK\("([^"]+)"/i); if(formula)return formula[1]; const url=text.match(/https?:\/\/[^",\s)]+/); return url?url[0]:text; }
 function extractFileId_(url) { const text=String(url || ''); const byPath=text.match(/\/d\/([a-zA-Z0-9_-]+)/); if(byPath)return byPath[1]; const byId=text.match(/[?&]id=([a-zA-Z0-9_-]+)/); return byId?byId[1]:''; }
 function sanitizeFileName_(name) { return String(name || 'himbauan.svg').replace(/[\\/:*?"<>|]/g,'-').slice(0,120); }
-function hashPassword_(password) { const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(password),Utilities.Charset.UTF_8); return digest.map(b=>(b+256)%256).map(b=>('0'+b.toString(16)).slice(-2)).join(''); }
+function hashPassword_(password) {
+  const salt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+  return 'pbkdf2$' + salt + '$' + pbkdf2Hash_(String(password), salt);
+}
+function pbkdf2Hash_(password, salt, iterations) {
+  iterations = iterations || 1000;
+  let value = salt + ':' + password;
+  for (let i = 0; i < iterations; i++) value = sha256Hex_(value);
+  return value;
+}
+function sha256Hex_(value) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8);
+  return digest.map(b => (b + 256) % 256).map(b => ('0' + b.toString(16)).slice(-2)).join('');
+}
+function verifyPassword_(password, storedHash) {
+  const stored = String(storedHash || '');
+  if (!stored) return false;
+  if (stored.indexOf('pbkdf2$') === 0) {
+    const parts = stored.split('$');
+    if (parts.length !== 3) return false;
+    return pbkdf2Hash_(String(password), parts[1]) === parts[2];
+  }
+  if (sha256Hex_(password) === stored) return true;
+  return String(stored) === String(password);
+}
+function neutralizeFormula_(value) {
+  const text = String(value || '');
+  return /^[=+\-@\t]/.test(text) ? "'" + text : text;
+}
+function sanitizeHtml_(html) {
+  let text = String(html || '');
+  text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  text = text.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '');
+  text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  text = text.replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, '');
+  text = text.replace(/<embed\b[^>]*>/gi, '');
+  text = text.replace(/<form\b[^>]*>[\s\S]*?<\/form>/gi, '');
+  text = text.replace(/<input\b[^>]*>/gi, '');
+  text = text.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  text = text.replace(/(?:href|src|action)\s*=\s*(?:"|')?\s*(?:javascript|vbscript|data):[^"'\s>]*/gi, '');
+  return text;
+}
 function today_() { return Utilities.formatDate(new Date(),Session.getScriptTimeZone() || 'Asia/Jakarta','dd/MM/yyyy'); }
 function formatDate_(date) { return Utilities.formatDate(date,Session.getScriptTimeZone() || 'Asia/Jakarta','dd/MM/yyyy HH:mm'); }
 function json_(data) { return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON); }
