@@ -140,6 +140,7 @@ function doPost(e) {
       case 'updateOrgMember': return updateOrgMember_(body);
       case 'deleteOrgMember': return deleteOrgMember_(body);
       case 'listKas': return listKas_(body);
+      case 'refreshKas': return refreshKas_(body);
       case 'createKas': return createKas_(body);
       case 'updateKas': return updateKas_(body);
       case 'deleteKas': return deleteKas_(body);
@@ -953,6 +954,12 @@ function listKas_(body) {
   const start = (page - 1) * perPage;
   const data = allRows.slice(start, start + perPage);
   return json_({ ok: true, data, total, page, perPage, totalPages, userRole: session.role, userId: session.userId, userNama: session.nama });
+}
+
+function refreshKas_(body) {
+  requireSession_(body.token);
+  invalidateData_('kas');
+  return json_({ ok: true });
 }
 
 function createKas_(body) {
