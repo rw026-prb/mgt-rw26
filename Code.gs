@@ -34,9 +34,11 @@ const NEWS_HEADERS = ['ID','Judul','Kategory','Isi','Tanggal','Foto','Status'];
 const FASUM_HEADERS = ['ID','NAMA','DESKRIPSI','FOTO','MAPS lokasi'];
 const ORG_HEADERS = ['ID','JABATAN','NAMA','FOTO'];
 const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status','Jumlah Foto','Thumbnail ID'];
+const VIDEO_SHEET_NAME = 'video';
+const VIDEO_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status'];
 const SESSION_SECONDS = 1800;
 const DATA_CACHE_TTL = 120;
-const PUBLIC_CACHE_TTL = 120;
+const PUBLIC_CACHE_TTL = 600;
 const GALLERY_CACHE_TTL = 600;
 
 function cacheGet_(key) {
@@ -49,15 +51,27 @@ function cacheSet_(key, value, ttl) {
   if (value === undefined) return;
   try {
     CacheService.getScriptCache().put(key, JSON.stringify(value), ttl);
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Cache gagal disimpan untuk ' + key + ': ' + e.message);
+  }
 }
 
 function cachedData_(key, ttl, compute) {
   const hit = cacheGet_(key);
   if (hit !== undefined) return hit;
-  const data = compute();
-  cacheSet_(key, data, ttl);
-  return data;
+  const lock = LockService.getScriptLock();
+  if (lock.tryLock(5000)) {
+    try {
+      const refreshed = cacheGet_(key);
+      if (refreshed !== undefined) return refreshed;
+      const data = compute();
+      cacheSet_(key, data, ttl);
+      return data;
+    } finally {
+      lock.releaseLock();
+    }
+  }
+  return compute();
 }
 
 function versionedKey_(module, suffix) {
@@ -76,7 +90,8 @@ function invalidateData_(module) {
     statistik: ['list_statistik'],
     users: ['list_users'],
     galeri: ['list_gallery_albums'],
-    kas: ['list_kas']
+    kas: ['list_kas'],
+    video: ['list_videos']
   };
   (staticKeys[module] || []).forEach(key => cache.remove(key));
   cache.remove('public_content');
@@ -95,6 +110,9 @@ function doGet(e) {
     }
     if (action === 'publicKasReport') {
       return publicKasReport_(e.parameter);
+    }
+    if (action === 'publicGalleryPhotos') {
+      return publicGalleryPhotos_(e.parameter);
     }
     
     // Fallback jika tidak ada parameter
@@ -162,6 +180,11 @@ function doPost(e) {
       case 'uploadGalleryPhoto': return uploadGalleryPhoto_(body);
       case 'deleteGalleryPhoto': return deleteGalleryPhoto_(body);
       case 'updateMyProfile': return updateMyProfile_(body);
+      case 'listVideos': return listVideos_(body);
+      case 'createVideo': return createVideo_(body);
+      case 'updateVideo': return updateVideo_(body);
+      case 'toggleVideo': return toggleVideo_(body);
+      case 'deleteVideo': return deleteVideo_(body);
       case 'requestPasswordReset': return requestPasswordReset_(body);
       case 'validateResetToken': return validateResetToken_(body);
       case 'resetPassword': return resetPassword_(body);
@@ -191,6 +214,34 @@ function setupPortalSheets() {
 
 function setupGallerySheet() {
   ensureHeader_(getGallerySheet_(), GALLERY_HEADERS);
+}
+
+function setupVideoSheet() {
+  ensureHeader_(getVideoSheet_(), VIDEO_HEADERS);
+}
+
+function refreshGalleryMetadata() {
+  const sheet = getGallerySheet_();
+  const rows = getGalleryRows_();
+  rows.forEach(function (row) {
+    const album = galleryRowToObject_(row);
+    if (!album.folderId) return;
+    try {
+      const files = DriveApp.getFolderById(album.folderId).getFiles();
+      let count = 0;
+      let thumbnailId = '';
+      while (files.hasNext()) {
+        const file = files.next();
+        if (!file.getMimeType().startsWith('image/')) continue;
+        if (!thumbnailId) thumbnailId = file.getId();
+        count++;
+      }
+      sheet.getRange(row.row, 7, 1, 2).setValues([[count, thumbnailId]]);
+    } catch (e) {
+      console.warn('Metadata galeri gagal disinkronkan untuk ' + album.id + ': ' + e.message);
+    }
+  });
+  invalidateData_('galeri');
 }
 
 function login_(body) {
@@ -244,25 +295,6 @@ function publicContentData_() {
     organization[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r));
   });
   
-  const gallery = getGalleryRows_()
-    .map(galleryRowToObject_)
-    .filter(isActive_)
-    .map(album => {
-      const photos = [];
-      try {
-        const folder = DriveApp.getFolderById(album.folderId);
-        const files = folder.getFiles();
-        while (files.hasNext()) {
-          const f = files.next();
-          if (f.getMimeType().startsWith('image/')) {
-            photos.push({ fileId: f.getId(), name: f.getName() });
-          }
-        }
-      } catch (e) {}
-      return { nama: album.nama, deskripsi: album.deskripsi, photos: photos };
-    })
-    .filter(album => album.photos.length > 0);
-  
   return {
     ok:true,
     himbauan:getHimbauanRows_().map(himbauanRowToObject_).filter(isActive_),
@@ -270,9 +302,49 @@ function publicContentData_() {
     news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_).filter(isActive_),
     facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_),
     organization:organization,
-    gallery: gallery,
-    statistik: getStatistikRows_().map(statistikRowToObject_)
+    gallery: publicGalleryAlbums_(),
+    statistik: getStatistikRows_().map(statistikRowToObject_),
+    videos: getVideoRows_().map(videoRowToObject_).filter(isActive_)
   };
+}
+
+function publicGalleryAlbums_() {
+  return getGalleryRows_()
+    .map(galleryRowToObject_)
+    .filter(isActive_)
+    .filter(album => album.photoCountStored > 0 && album.thumbnailId)
+    .map(album => ({
+      id: album.id,
+      nama: album.nama,
+      deskripsi: album.deskripsi,
+      photoCount: album.photoCountStored,
+      thumbnailId: album.thumbnailId
+    }));
+}
+
+function publicGalleryPhotos_(params) {
+  const albumId = String((params && params.albumId) || '').trim();
+  if (!albumId) throw new Error('ID album wajib diisi.');
+  const albumRow = findGalleryRow_(albumId);
+  if (!albumRow) throw new Error('Album tidak ditemukan.');
+  const album = galleryRowToObject_(albumRow);
+  if (!isActive_(album) || !album.folderId) throw new Error('Album tidak tersedia.');
+  const key = versionedKey_('galeri', 'public_album_' + album.id);
+  const photos = cachedData_(key, GALLERY_CACHE_TTL, function () {
+    try {
+      const files = DriveApp.getFolderById(album.folderId).getFiles();
+      const result = [];
+      while (files.hasNext()) {
+        const file = files.next();
+        if (file.getMimeType().startsWith('image/')) result.push({ fileId: file.getId(), name: file.getName() });
+      }
+      return result;
+    } catch (e) {
+      console.warn('Galeri gagal dimuat untuk ' + album.id + ': ' + e.message);
+      throw new Error('Foto album belum dapat dimuat.');
+    }
+  });
+  return json_({ ok: true, album: { id: album.id, nama: album.nama }, photos: photos });
 }
 
 function publicKasReport_(params) {
@@ -532,6 +604,57 @@ function deleteHimbauan_(body) {
   logActivity_(requireSession_(body.token), 'delete', 'himbauan', 'Menghapus himbauan "' + found.values[1] + '"');
   invalidateData_('himbauan');
   return json_({ok:true, message:'Himbauan berhasil dihapus.'});
+}
+
+function listVideos_(body) {
+  requireSession_(body.token);
+  return json_({ok:true, videos:cachedData_('list_videos', DATA_CACHE_TTL, function(){ return getVideoRows_().map(videoRowToObject_); })});
+}
+
+function createVideo_(body) {
+  requireMenuAccess_(body.token, 'video');
+  const item = body.video || {};
+  const videoId = extractYoutubeId_(item.url);
+  if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
+  const sheet = getVideoSheet_();
+  const id = nextId_(getVideoRows_().map(r => r.values), 'VID-');
+  sheet.appendRow([id, neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal || today_(), item.status || 'Aktif']);
+  logActivity_(requireSession_(body.token), 'create', 'video', 'Menambah video "' + item.judul + '"');
+  invalidateData_('video');
+  return json_({ok:true, id:id});
+}
+
+function updateVideo_(body) {
+  requireMenuAccess_(body.token, 'video');
+  const item = body.video || {}, found = findVideoRow_(item.id);
+  if (!found) throw new Error('Video tidak ditemukan.');
+  const videoId = extractYoutubeId_(item.url);
+  if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
+  getVideoSheet_().getRange(found.row,1,1,6).setValues([[found.values[0], neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal, item.status]]);
+  logActivity_(requireSession_(body.token), 'update', 'video', 'Memperbarui video "' + item.judul + '"');
+  invalidateData_('video');
+  return json_({ok:true});
+}
+
+function toggleVideo_(body) {
+  requireMenuAccess_(body.token, 'video');
+  const found = findVideoRow_(body.id);
+  if (!found) throw new Error('Video tidak ditemukan.');
+  const status = String(found.values[5]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
+  getVideoSheet_().getRange(found.row,6).setValue(status);
+  logActivity_(requireSession_(body.token), 'toggle', 'video', 'Mengubah status video "' + found.values[1] + '" ke ' + status);
+  invalidateData_('video');
+  return json_({ok:true, status:status});
+}
+
+function deleteVideo_(body) {
+  requireMenuAccess_(body.token, 'video');
+  const found = findVideoRow_(body.id);
+  if (!found) throw new Error('Video tidak ditemukan.');
+  getVideoSheet_().deleteRow(found.row);
+  logActivity_(requireSession_(body.token), 'delete', 'video', 'Menghapus video "' + found.values[1] + '"');
+  invalidateData_('video');
+  return json_({ok:true, message:'Video berhasil dihapus.'});
 }
 
 function listAnnouncements_(body) {
@@ -857,7 +980,21 @@ function deleteGalleryPhoto_(body) {
         const rowNum = albumRows[idx].row;
         const cur = Math.max(0, parseInt(albumRows[idx].values[6] || '0', 10) - 1);
         sheet.getRange(rowNum, 7).setValue(cur);
-      } catch (e) {}
+        if (String(albumRows[idx].values[7] || '') === String(body.fileId)) {
+          const files = DriveApp.getFolderById(parentFolderId).getFiles();
+          let thumbnailId = '';
+          while (files.hasNext()) {
+            const file = files.next();
+            if (file.getMimeType().startsWith('image/')) {
+              thumbnailId = file.getId();
+              break;
+            }
+          }
+          sheet.getRange(rowNum, 8).setValue(thumbnailId);
+        }
+      } catch (e) {
+        console.warn('Metadata album gagal diperbarui: ' + e.message);
+      }
     }
   }
   invalidateData_('galeri');
@@ -1406,6 +1543,7 @@ function getSheet_() { return openSheet_(USER_SPREADSHEET_ID, USER_SHEET_NAME); 
 function getHimbauanSheet_() { return openSheet_(HIMBAUAN_SPREADSHEET_ID, HIMBAUAN_SHEET_NAME); }
 function getInfoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, INFO_SHEET_NAME); }
 function getNewsSheet_() { return openSheet_(INFO_SPREADSHEET_ID, NEWS_SHEET_NAME); }
+function getVideoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, VIDEO_SHEET_NAME); }
 function getFacilitySheet_() { return openSheet_(FASUM_SPREADSHEET_ID, FASUM_SHEET_NAME); }
 function getOrgSheet_(name) { return openSheet_(ORG_SPREADSHEET_ID, name); }
 function openSheet_(spreadsheetId, sheetName) { const ss=SpreadsheetApp.openById(spreadsheetId); let sheet=ss.getSheetByName(sheetName); if(!sheet) sheet=ss.insertSheet(sheetName); return sheet; }
@@ -1420,6 +1558,14 @@ function himbauanRowToObject_(row) { const v=row.values, formula=row.formulas ? 
 function getTableRows_(sheet, width, needFormulas) { const last=sheet.getLastRow(); if(last<2)return []; const range=sheet.getRange(2,1,last-1,width); const values=range.getDisplayValues(); const formulas = needFormulas === false ? null : range.getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas?formulas[i]:null})).filter(r=>r.values[0]); }
 function findTableRow_(sheet, id, width) { const rows=getTableRows_(sheet, width), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
 function announcementRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],kategori:v[2],ringkasan:v[3],tanggal:v[4],status:v[5]}; }
+function getVideoRows_() { return getTableRows_(getVideoSheet_(), 6, false); }
+function findVideoRow_(id) { const rows=getVideoRows_(), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
+function videoRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],deskripsi:v[2],url:v[3],tanggal:v[4],status:v[5],videoId:extractYoutubeId_(v[3])}; }
+function extractYoutubeId_(url) {
+  const text = String(url || '');
+  const m = text.match(/(?:youtube\.com\/(?:watch\?.*?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : '';
+}
 function newsRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[5]) || v[5]); const fileId=extractFileId_(foto); return {id:v[0],judul:v[1],category:v[2],isi:v[3],tanggal:v[4],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,status:v[6]}; }
 function facilityRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {id:v[0],nama:v[1],deskripsi:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,maps:v[4]}; }
 function orgRowToObject_(group, row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {group:group,id:v[0],jabatan:v[1],nama:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w800':foto,fileId:fileId}; }
