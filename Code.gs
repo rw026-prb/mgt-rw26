@@ -35,7 +35,7 @@ const FASUM_HEADERS = ['ID','NAMA','DESKRIPSI','FOTO','MAPS lokasi'];
 const ORG_HEADERS = ['ID','JABATAN','NAMA','FOTO'];
 const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status','Jumlah Foto','Thumbnail ID'];
 const VIDEO_SHEET_NAME = 'video';
-const VIDEO_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status'];
+const VIDEO_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status','Autoplay'];
 const SESSION_SECONDS = 1800;
 const DATA_CACHE_TTL = 120;
 const PUBLIC_CACHE_TTL = 600;
@@ -184,6 +184,8 @@ function doPost(e) {
       case 'createVideo': return createVideo_(body);
       case 'updateVideo': return updateVideo_(body);
       case 'toggleVideo': return toggleVideo_(body);
+      case 'setVideoAutoplay': return setVideoAutoplay_(body);
+      case 'clearVideoAutoplay': return clearVideoAutoplay_(body);
       case 'deleteVideo': return deleteVideo_(body);
       case 'requestPasswordReset': return requestPasswordReset_(body);
       case 'validateResetToken': return validateResetToken_(body);
@@ -616,9 +618,13 @@ function createVideo_(body) {
   const item = body.video || {};
   const videoId = extractYoutubeId_(item.url);
   if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
+  const status = item.status || 'Aktif';
+  const wantAutoplay = String(item.autoplay||'').toLowerCase()==='ya'||String(item.autoplay||'').toLowerCase()==='true'||item.autoplay===true;
+  if (wantAutoplay && String(status).toLowerCase()!=='aktif') throw new Error('Hanya video Aktif yang bisa dijadikan autoplay.');
+  if (wantAutoplay) clearAllVideoAutoplay_();
   const sheet = getVideoSheet_();
   const id = nextId_(getVideoRows_().map(r => r.values), 'VID-');
-  sheet.appendRow([id, neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal || today_(), item.status || 'Aktif']);
+  sheet.appendRow([id, neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal || today_(), status, wantAutoplay?'Ya':'']);
   logActivity_(requireSession_(body.token), 'create', 'video', 'Menambah video "' + item.judul + '"');
   invalidateData_('video');
   return json_({ok:true, id:id});
@@ -630,7 +636,13 @@ function updateVideo_(body) {
   if (!found) throw new Error('Video tidak ditemukan.');
   const videoId = extractYoutubeId_(item.url);
   if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
-  getVideoSheet_().getRange(found.row,1,1,6).setValues([[found.values[0], neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal, item.status]]);
+  const status = item.status || found.values[5] || 'Aktif';
+  const autoplayRaw = item.autoplay!==undefined ? item.autoplay : found.values[6];
+  const wantAutoplay = String(autoplayRaw||'').toLowerCase()==='ya'||String(autoplayRaw||'').toLowerCase()==='true'||autoplayRaw===true;
+  if (wantAutoplay && String(status).toLowerCase()!=='aktif') throw new Error('Hanya video Aktif yang bisa dijadikan autoplay.');
+  if (wantAutoplay) clearAllVideoAutoplay_();
+  const sheet=getVideoSheet_();
+  sheet.getRange(found.row,1,1,7).setValues([[found.values[0], neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal, status, wantAutoplay?'Ya':'']]);
   logActivity_(requireSession_(body.token), 'update', 'video', 'Memperbarui video "' + item.judul + '"');
   invalidateData_('video');
   return json_({ok:true});
@@ -642,9 +654,28 @@ function toggleVideo_(body) {
   if (!found) throw new Error('Video tidak ditemukan.');
   const status = String(found.values[5]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getVideoSheet_().getRange(found.row,6).setValue(status);
+  if (status==='Nonaktif') getVideoSheet_().getRange(found.row,7).setValue('');
   logActivity_(requireSession_(body.token), 'toggle', 'video', 'Mengubah status video "' + found.values[1] + '" ke ' + status);
   invalidateData_('video');
   return json_({ok:true, status:status});
+}
+function setVideoAutoplay_(body){
+  requireMenuAccess_(body.token, 'video');
+  const found=findVideoRow_(body.id);
+  if(!found) throw new Error('Video tidak ditemukan.');
+  if(String(found.values[5]).toLowerCase()!=='aktif') throw new Error('Hanya video Aktif yang bisa dijadikan autoplay.');
+  const lock=LockService.getScriptLock();
+  if(lock.tryLock(8000)){ try{ clearAllVideoAutoplay_(); getVideoSheet_().getRange(found.row,7).setValue('Ya'); } finally{ lock.releaseLock(); } } else { clearAllVideoAutoplay_(); getVideoSheet_().getRange(found.row,7).setValue('Ya'); }
+  logActivity_(requireSession_(body.token), 'update', 'video', 'Menjadikan autoplay "'+found.values[1]+'"');
+  invalidateData_('video');
+  return json_({ok:true});
+}
+function clearVideoAutoplay_(body){
+  requireMenuAccess_(body.token, 'video');
+  clearAllVideoAutoplay_();
+  logActivity_(requireSession_(body.token), 'update', 'video', 'Menghapus autoplay video');
+  invalidateData_('video');
+  return json_({ok:true});
 }
 
 function deleteVideo_(body) {
@@ -1558,15 +1589,16 @@ function himbauanRowToObject_(row) { const v=row.values, formula=row.formulas ? 
 function getTableRows_(sheet, width, needFormulas) { const last=sheet.getLastRow(); if(last<2)return []; const range=sheet.getRange(2,1,last-1,width); const values=range.getDisplayValues(); const formulas = needFormulas === false ? null : range.getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas?formulas[i]:null})).filter(r=>r.values[0]); }
 function findTableRow_(sheet, id, width) { const rows=getTableRows_(sheet, width), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
 function announcementRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],kategori:v[2],ringkasan:v[3],tanggal:v[4],status:v[5]}; }
-function getVideoRows_() { return getTableRows_(getVideoSheet_(), 6, false); }
+function getVideoRows_() { return getTableRows_(getVideoSheet_(), 7, false); }
 function findVideoRow_(id) { const rows=getVideoRows_(), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
-function videoRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],deskripsi:v[2],url:v[3],tanggal:v[4],status:v[5],videoId:extractYoutubeId_(v[3])}; }
+function videoRowToObject_(row) { const v=row.values; const ap=String(v[6]||'').toLowerCase(); return {id:v[0],judul:v[1],deskripsi:v[2],url:v[3],tanggal:v[4],status:v[5],autoplay:ap==='ya'||ap==='true'||ap==='1',videoId:extractYoutubeId_(v[3])}; }
+function clearAllVideoAutoplay_(){ const sheet=getVideoSheet_(), last=sheet.getLastRow(); if(last<2) return; const n=last-1; const vals=sheet.getRange(2,7,n,1).getValues(); let dirty=false; for(let i=0;i<n;i++){ if(String(vals[i][0]).trim()!==''){ vals[i][0]=''; dirty=true; } } if(dirty) sheet.getRange(2,7,n,1).setValues(vals); }
 function extractYoutubeId_(url) {
   const text = String(url || '');
   const m = text.match(/(?:youtube\.com\/(?:watch\?.*?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return m ? m[1] : '';
 }
-function newsRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[5]) || v[5]); const fileId=extractFileId_(foto); return {id:v[0],judul:v[1],category:v[2],isi:v[3],tanggal:v[4],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,status:v[6]}; }
+function newsRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[5]) || v[5]); const fileId=extractFileId_(foto); const cat=String(v[2]||'').trim()||'Informasi'; return {id:v[0],judul:v[1],category:cat,kategori:cat,isi:v[3],tanggal:v[4],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,status:v[6]}; }
 function facilityRowToObject_(row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {id:v[0],nama:v[1],deskripsi:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w1200':foto,fileId:fileId,maps:v[4]}; }
 function orgRowToObject_(group, row) { const v=row.values, foto=extractUrl_((row.formulas && row.formulas[3]) || v[3]); const fileId=extractFileId_(foto); return {group:group,id:v[0],jabatan:v[1],nama:v[2],foto:foto,imageUrl:fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w800':foto,fileId:fileId}; }
 function isActive_(item) { return String(item.status || 'Aktif').toLowerCase() === 'aktif'; }
