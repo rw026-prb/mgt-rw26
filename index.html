@@ -438,6 +438,36 @@
 
     <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>No HP</th><th>Role</th><th>Wilayah</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr></tbody></table></div></div></div></section>
 
+    <section class="page" id="visitor">
+      <div class="d-flex flex-wrap justify-content-between gap-3 mb-4">
+        <div><div class="eyebrow">ANALITIK</div><h1 class="page-title h3">Monitoring Pengunjung</h1><p class="text-secondary mb-0">Kunjungan website publik RW 026 — khusus Super Admin.</p></div>
+        <div class="d-flex gap-2"><button class="btn btn-light border" id="refreshVisitor"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-outline-success" onclick="exportVisitorCsv()"><i class="bi bi-download me-2"></i>Export CSV</button></div>
+      </div>
+      <div class="alert alert-danger d-none" id="visitorError"></div>
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#0a6c50"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-eye-fill"></i></div><div><div class="text-secondary small">Total Kunjungan</div><div class="h4 fw-bold mb-0" id="vTotal">-</div><small class="text-secondary" id="vSesi">- sesi unik</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#2f80ed"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-calendar-day"></i></div><div><div class="text-secondary small">Hari Ini</div><div class="h4 fw-bold mb-0" id="vToday">-</div><small class="text-secondary">kunjungan</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#e9a23b"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-graph-up-arrow"></i></div><div><div class="text-secondary small">7 Hari Terakhir</div><div class="h4 fw-bold mb-0" id="v7">-</div><small class="text-secondary">kunjungan</small></div></div></div></div>
+        <div class="col-6 col-xl-3"><div class="card stat-card h-100" style="--stat-color:#9b51e0"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon"><i class="bi bi-bullseye"></i></div><div><div class="text-secondary small">Halaman Teratas</div><div class="fw-bold small mb-0" id="vTopPage" style="font-size:.85rem;line-height:1.3">-</div></div></div></div></div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-lg-8"><div class="card"><div class="card-body"><h6 class="fw-bold mb-3"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Grafik 14 Hari</h6><div style="height:280px"><canvas id="visitorChart"></canvas></div></div></div></div>
+        <div class="col-lg-4"><div class="card h-100"><div class="card-body"><h6 class="fw-bold mb-3"><i class="bi bi-box-arrow-in-right me-2"></i>Referrer Teratas</h6><div id="vTopRefs" class="small text-secondary">Memuat...</div><hr><h6 class="fw-bold mb-2"><i class="bi bi-globe me-2"></i>Bahasa</h6><div id="vLangs" class="small text-secondary">-</div></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div class="row g-2 align-items-end mb-3">
+            <div class="col-md-3"><label class="form-label small fw-bold">Dari</label><input type="date" class="form-control form-control-sm" id="vFrom"></div>
+            <div class="col-md-3"><label class="form-label small fw-bold">Sampai</label><input type="date" class="form-control form-control-sm" id="vTo"></div>
+            <div class="col-md-3"><label class="form-label small fw-bold">Cari</label><input type="search" class="form-control form-control-sm" id="vSearch" placeholder="page / referrer / UA"></div>
+            <div class="col-md-3"><button class="btn btn-primary btn-sm w-100" onclick="loadVisitor(true)"><i class="bi bi-search me-1"></i>Tampilkan</button></div>
+          </div>
+          <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Waktu</th><th>Halaman</th><th>Referrer</th><th>UA</th><th>Screen</th></tr></thead><tbody id="visitorTable"><tr><td colspan="5" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat...</td></tr></tbody></table></div>
+          <div id="visitorPagination" class="mt-3 d-flex justify-content-center"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="page" id="profil">
       <div class="mb-4">
         <div class="eyebrow">AKUN</div>
@@ -557,21 +587,24 @@
       { id: 'organisasi', label: 'Struktur Organisasi', icon: 'bi-diagram-3-fill', group: 'MENU UTAMA' },
       { id: 'galeri', label: 'Galeri Foto', icon: 'bi-images', group: 'MENU UTAMA' },
       { id: 'statistik', label: 'Statistik Warga', icon: 'bi-bar-chart-fill', group: 'DATA WARGA' },
+      { id: 'visitor', label: 'Monitoring Pengunjung', icon: 'bi-eye-fill', group: 'ANALITIK' },
       { id: 'kas', label: 'Kas RW', icon: 'bi-wallet2', group: 'ADMINISTRASI' },
       { id: 'users', label: 'Manajemen User', icon: 'bi-people-fill', group: 'ADMINISTRASI' },
       { id: 'profil', label: 'Profil Saya', icon: 'bi-person-circle', group: 'AKUN' }
     ];
     const ADMIN_ONLY_MENUS = ['users'];
+    const SUPER_ONLY_MENUS = ['visitor'];
 
     function getEditorMenus() {
       const user = session?.user;
       if (!user) return ALL_MENUS;
       const role = user.role || '';
-      if (role === 'Super Admin' || role === 'Admin') return ALL_MENUS;
+      if (role === 'Super Admin') return ALL_MENUS;
+      if (role === 'Admin') return ALL_MENUS.filter(m => !SUPER_ONLY_MENUS.includes(m.id));
       const menuAkses = user.menuAkses || '[]';
       let allowed = [];
       try { allowed = JSON.parse(menuAkses); } catch (e) { allowed = []; }
-      return ALL_MENUS.filter(m => !ADMIN_ONLY_MENUS.includes(m.id) && (m.id === 'dashboard' || m.id === 'profil' || allowed.includes(m.id)));
+      return ALL_MENUS.filter(m => !ADMIN_ONLY_MENUS.includes(m.id) && !SUPER_ONLY_MENUS.includes(m.id) && (m.id === 'dashboard' || m.id === 'profil' || allowed.includes(m.id)));
     }
 
     function renderSidebar() {
@@ -996,6 +1029,57 @@
     document.getElementById('videoUrl').addEventListener('input',renderVideoPreview);
     document.getElementById('videoForm').onsubmit=async e=>{e.preventDefault();const btn=document.getElementById('saveVideoButton');const id=document.getElementById('videoId').value;const status=document.getElementById('videoStatus').value;const autoplay=document.getElementById('videoAutoplay').checked; if(autoplay && status!=='Aktif'){alert('Hanya video Aktif yang bisa autoplay.');return;} const payload={video:{id,judul:document.getElementById('videoJudul').value.trim(),url:document.getElementById('videoUrl').value.trim(),deskripsi:document.getElementById('videoDeskripsi').value.trim(),status,autoplay:autoplay?'Ya':''}};btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{if(id){await apiRequest('updateVideo',payload);}else{delete payload.video.id;await apiRequest('createVideo',payload);}bootstrap.Modal.getInstance('#videoModal').hide();document.getElementById('toastMessage').textContent=id?'Video diperbarui.':'Video berhasil ditambahkan.';toast();await loadVideo();}catch(err){alert(err.message);}finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-youtube me-1"></i>Simpan Video';}};
 
+    let visitorLogsCache=[]; let vPage=1; let vTotalPages=1; let visitorChartInstance=null; let visitorStatsCache=null;
+    async function loadVisitor(force=false){
+      const err=document.getElementById('visitorError'); err.classList.add('d-none');
+      if(session?.user?.role!=='Super Admin'){ err.textContent='Hanya Super Admin.'; err.classList.remove('d-none'); return; }
+      document.getElementById('visitorTable').innerHTML='<tr><td colspan="5" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat statistik...</td></tr>';
+      try{
+        const stats=await apiRequest('getVisitorStats'); visitorStatsCache=stats;
+        document.getElementById('vTotal').textContent=(stats.total||0).toLocaleString('id-ID');
+        document.getElementById('vToday').textContent=(stats.today||0).toLocaleString('id-ID');
+        document.getElementById('v7').textContent=(stats.last7||0).toLocaleString('id-ID');
+        document.getElementById('vSesi').textContent=(stats.uniqueSessions||0).toLocaleString('id-ID')+' sesi unik';
+        document.getElementById('vTopPage').textContent=stats.topPages?.[0]? stats.topPages[0].page+' ('+stats.topPages[0].count+')' : '-';
+        document.getElementById('vTopRefs').innerHTML=stats.topRefs?.length? stats.topRefs.map(r=>'<div class="d-flex justify-content-between"><span class="text-truncate me-2">'+esc(r.ref)+'</span><span class="badge text-bg-light border">'+r.count+'</span></div>').join('') : '<span class="text-secondary">Belum ada referrer.</span>';
+        document.getElementById('vLangs').innerHTML=stats.langs? Object.entries(stats.langs).map(([k,v])=>'<span class="badge text-bg-light border me-1 mb-1">'+esc(k)+': '+v+'</span>').join('')||'-' : '-';
+        const ctx=document.getElementById('visitorChart'); if(ctx){
+          if(visitorChartInstance) visitorChartInstance.destroy();
+          visitorChartInstance=new Chart(ctx,{type:'bar',data:{labels:(stats.daily||[]).map(d=>d.label),datasets:[{label:'Kunjungan',data:(stats.daily||[]).map(d=>d.count),backgroundColor:'#0a6c50',borderRadius:6,barThickness:10}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{grid:{display:false}}}}});
+        }
+        await loadVisitorLogs();
+      }catch(e){ err.textContent=e.message; err.classList.remove('d-none'); document.getElementById('visitorTable').innerHTML='<tr><td colspan="5" class="text-center text-danger py-5">Gagal memuat.</td></tr>'; }
+    }
+    async function loadVisitorLogs(){
+      const from=document.getElementById('vFrom').value; const to=document.getElementById('vTo').value; const search=document.getElementById('vSearch').value.trim();
+      document.getElementById('visitorTable').innerHTML='<tr><td colspan="5" class="text-center text-secondary py-4"><span class="spinner-border spinner-border-sm me-2"></span>Memuat log...</td></tr>';
+      try{
+        const res=await apiRequest('getVisitorLogs',{page:vPage,limit:20,from,to,search});
+        vTotalPages=res.totalPages||1; visitorLogsCache=res.data||[];
+        if(!res.data.length){ document.getElementById('visitorTable').innerHTML='<tr><td colspan="5" class="text-center text-secondary py-4">Belum ada data pada rentang ini.</td></tr>'; document.getElementById('visitorPagination').innerHTML=''; return; }
+        document.getElementById('visitorTable').innerHTML=res.data.map(r=>'<tr><td class="small text-nowrap">'+esc(r.timestamp)+'</td><td class="small">'+esc(r.page)+'</td><td class="small text-truncate" style="max-width:160px" title="'+esc(r.referrer)+'">'+esc(r.referrer||'-')+'</td><td class="small text-truncate" style="max-width:180px" title="'+esc(r.ua)+'">'+esc(r.ua.slice(0,80))+'</td><td class="small text-nowrap">'+esc(r.screen||'-')+'</td></tr>').join('');
+        let html='<nav><ul class="pagination pagination-sm mb-0 justify-content-center">';
+        html+='<li class="page-item'+(vPage<=1?' disabled':'')+'"><a class="page-link" href="#" onclick="event.preventDefault();vGo(1)">«</a></li>';
+        html+='<li class="page-item'+(vPage<=1?' disabled':'')+'"><a class="page-link" href="#" onclick="event.preventDefault();vGo('+(vPage-1)+')">‹</a></li>';
+        for(let p=Math.max(1,vPage-2);p<=Math.min(vTotalPages,vPage+2);p++) html+='<li class="page-item'+(p===vPage?' active':'')+'"><a class="page-link" href="#" onclick="event.preventDefault();vGo('+p+')">'+p+'</a></li>';
+        html+='<li class="page-item'+(vPage>=vTotalPages?' disabled':'')+'"><a class="page-link" href="#" onclick="event.preventDefault();vGo('+(vPage+1)+')">›</a></li>';
+        html+='<li class="page-item'+(vPage>=vTotalPages?' disabled':'')+'"><a class="page-link" href="#" onclick="event.preventDefault();vGo('+vTotalPages+')">»</a></li></ul></nav>';
+        document.getElementById('visitorPagination').innerHTML=vTotalPages>1?html:'';
+      }catch(e){ document.getElementById('visitorTable').innerHTML='<tr><td colspan="5" class="text-center text-danger py-4">'+esc(e.message)+'</td></tr>'; }
+    }
+    function vGo(p){ if(p<1||p>vTotalPages||p===vPage) return; vPage=p; loadVisitorLogs(); }
+    window.exportVisitorCsv=async()=>{
+      if(!visitorLogsCache.length){ toast('Tidak ada data untuk di-export.',true); return; }
+      const header=['Timestamp','Tanggal','Page','Referrer','UA','Bahasa','Screen','SessionId'];
+      const rows=[header.join(',')];
+      visitorLogsCache.forEach(r=>{
+        const vals=[r.timestamp,r.tanggal,r.page,r.referrer,r.ua,r.bahasa,r.screen,r.sessionId].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"');
+        rows.push(vals.join(','));
+      });
+      const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='visitor_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+    };
+
     const menuLoaders = {
       himbauan: loadHimbauan,
       pengumuman: loadAnnouncements,
@@ -1005,6 +1089,7 @@
       galeri: loadGalleryAlbums,
       video: loadVideo,
       statistik: loadStatistik,
+      visitor: loadVisitor,
       kas: muatKas,
       users: loadUsers,
       profil: muatProfilSaya
@@ -1019,12 +1104,13 @@
 
     function navigate(page){
       const role = session?.user?.role || '';
+      if (SUPER_ONLY_MENUS.includes(page) && role !== 'Super Admin') page = 'dashboard';
       if (role === 'Editor') {
         const menuAkses = session?.user?.menuAkses || '[]';
         let allowed = [];
         try { allowed = JSON.parse(menuAkses); } catch (e) { allowed = []; }
-        if (ADMIN_ONLY_MENUS.includes(page) || (page !== 'dashboard' && page !== 'profil' && !allowed.includes(page))) page = 'dashboard';
-      }
+        if (ADMIN_ONLY_MENUS.includes(page) || SUPER_ONLY_MENUS.includes(page) || (page !== 'dashboard' && page !== 'profil' && !allowed.includes(page))) page = 'dashboard';
+      } else if (role === 'Admin' && SUPER_ONLY_MENUS.includes(page)) page = 'dashboard';
       ensureLoaded(page);
       document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===page));
       const sidebarLinks = document.querySelectorAll('#sidebarMenu .nav-link');
@@ -1124,6 +1210,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     document.getElementById('refreshKas').onclick=refreshKas;
     document.getElementById('refreshStatistik').onclick=loadStatistik;
     document.getElementById('statistikForm').onsubmit=async e=>{e.preventDefault();await simpanStatistik(e.target);};
+    document.getElementById('refreshVisitor').onclick=()=>{vPage=1; loadVisitor(true);};
     document.getElementById('refreshGallery').onclick=loadGalleryAlbums;
     document.getElementById('refreshVideo').onclick=loadVideo;
     document.getElementById('btnBackToAlbums').onclick=closeAlbumView;

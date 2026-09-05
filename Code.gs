@@ -36,6 +36,9 @@ const ORG_HEADERS = ['ID','JABATAN','NAMA','FOTO'];
 const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status','Jumlah Foto','Thumbnail ID'];
 const VIDEO_SHEET_NAME = 'video';
 const VIDEO_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status','Autoplay'];
+const VISITOR_SHEET_NAME = 'visitor_log';
+const VISITOR_HEADERS = ['Timestamp','Tanggal','Page','Referrer','UA','Bahasa','Screen','SessionId'];
+const VISITOR_CACHE_TTL = 60;
 const SESSION_SECONDS = 1800;
 const DATA_CACHE_TTL = 120;
 const PUBLIC_CACHE_TTL = 600;
@@ -101,21 +104,13 @@ function invalidateData_(module) {
 
 function doGet(e) {
   try {
-    // Tangkap parameter 'action' dari URL
     const action = e && e.parameter && e.parameter.action;
-    
-    // Jika action adalah publicContent, kirimkan data portal
-    if (action === 'publicContent') {
-      return publicContent_();
-    }
-    if (action === 'publicKasReport') {
-      return publicKasReport_(e.parameter);
-    }
-    if (action === 'publicGalleryPhotos') {
-      return publicGalleryPhotos_(e.parameter);
-    }
-    
-    // Fallback jika tidak ada parameter
+    if (action === 'publicContent') return publicContent_();
+    if (action === 'publicKasReport') return publicKasReport_(e.parameter);
+    if (action === 'publicGalleryPhotos') return publicGalleryPhotos_(e.parameter);
+    if (action === 'logVisitor') return logVisitor_(e.parameter);
+    if (action === 'getVisitorStats') return json_({ok:false, message:'Gunakan POST.'});
+    if (action === 'getVisitorLogs') return json_({ok:false, message:'Gunakan POST.'});
     return json_({ok:true, service:'Portal RW 26 API', time:formatDate_(new Date())});
   } catch (err) {
     return json_({ok:false, message:err.message || 'Terjadi kesalahan server.'});
@@ -187,6 +182,9 @@ function doPost(e) {
       case 'setVideoAutoplay': return setVideoAutoplay_(body);
       case 'clearVideoAutoplay': return clearVideoAutoplay_(body);
       case 'deleteVideo': return deleteVideo_(body);
+      case 'logVisitor': return logVisitor_(body);
+      case 'getVisitorStats': return getVisitorStats_(body);
+      case 'getVisitorLogs': return getVisitorLogs_(body);
       case 'requestPasswordReset': return requestPasswordReset_(body);
       case 'validateResetToken': return validateResetToken_(body);
       case 'resetPassword': return resetPassword_(body);
@@ -416,6 +414,107 @@ function kasReportData_(bulan, tahun) {
   return { saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, latestTimestamp: latestTimestamp };
 }
 
+function getVisitorSheet_() { return openSheet_(USER_SPREADSHEET_ID, VISITOR_SHEET_NAME); }
+function getVisitorRows_() {
+  const sheet = getVisitorSheet_();
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  const vals = sheet.getRange(2, 1, last - 1, VISITOR_HEADERS.length).getDisplayValues();
+  return vals.map((v, i) => ({ row: i + 2, values: v })).filter(r => r.values[0]);
+}
+function logVisitor_(body) {
+  try {
+    const page = String(body.page || body.path || '/').slice(0, 200) || '/';
+    const referrer = String(body.referrer || '').slice(0, 400);
+    const ua = String(body.ua || body.userAgent || body.UA || '').slice(0, 400);
+    const bahasa = String(body.bahasa || body.lang || body.language || '').slice(0, 20);
+    const screen = String(body.screen || '').slice(0, 30);
+    const sid = String(body.sessionId || body.sid || body.session || '').slice(0, 60) || 'anon';
+    const cache = CacheService.getScriptCache();
+    const rlKey = 'vlog_' + sid + '_' + page;
+    if (cache.get(rlKey)) return json_({ ok: true, dedup: true });
+    cache.put(rlKey, '1', 30);
+    const sheet = getVisitorSheet_();
+    ensureHeader_(sheet, VISITOR_HEADERS);
+    const tz = Session.getScriptTimeZone() || 'Asia/Jakarta';
+    const now = new Date();
+    const ts = formatDate_(now);
+    const tgl = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    const lock = LockService.getScriptLock();
+    if (lock.tryLock(5000)) {
+      try { sheet.appendRow([ts, tgl, neutralizeFormula_(page), neutralizeFormula_(referrer), neutralizeFormula_(ua), neutralizeFormula_(bahasa), neutralizeFormula_(screen), neutralizeFormula_(sid)]); } finally { lock.releaseLock(); }
+    } else {
+      sheet.appendRow([ts, tgl, neutralizeFormula_(page), neutralizeFormula_(referrer), neutralizeFormula_(ua), neutralizeFormula_(bahasa), neutralizeFormula_(screen), neutralizeFormula_(sid)]);
+    }
+    cache.remove('visitor_stats_cache');
+    return json_({ ok: true });
+  } catch (e) { return json_({ ok: false, message: e.message || 'Gagal log visitor' }); }
+}
+function getVisitorStats_(body) {
+  requireSuperAdmin_(body.token);
+  const key = 'visitor_stats_cache';
+  const cached = cacheGet_(key);
+  if (cached !== undefined) return json_({ ok: true, ...cached });
+  const rows = getVisitorRows_();
+  const tz = Session.getScriptTimeZone() || 'Asia/Jakarta';
+  const todayStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  const parseTgl = (v) => String(v || '').slice(0, 10);
+  let today = 0;
+  const dailyMap = {};
+  const pageMap = {};
+  const refMap = {};
+  const sessSet = new Set();
+  const langMap = {};
+  rows.forEach(r => {
+    const v = r.values;
+    const tgl = parseTgl(v[1]);
+    const page = String(v[2] || '/');
+    const ref = String(v[3] || '');
+    const lang = String(v[5] || '');
+    const sid = String(v[7] || '');
+    if (tgl === todayStr) today++;
+    dailyMap[tgl] = (dailyMap[tgl] || 0) + 1;
+    pageMap[page] = (pageMap[page] || 0) + 1;
+    if (ref) {
+      try { const host = new URL(ref).hostname || ref; refMap[host] = (refMap[host] || 0) + 1; } catch (e) { refMap[ref.slice(0, 40)] = (refMap[ref.slice(0, 40)] || 0) + 1; }
+    }
+    if (lang) langMap[lang.slice(0, 10)] = (langMap[lang.slice(0, 10)] || 0) + 1;
+    if (sid) sessSet.add(sid);
+  });
+  const daily = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const ds = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+    const label = Utilities.formatDate(d, tz, 'dd/MM');
+    daily.push({ date: ds, label: label, count: dailyMap[ds] || 0 });
+  }
+  const last7 = daily.slice(-7).reduce((s, x) => s + x.count, 0);
+  const topPages = Object.entries(pageMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, count]) => ({ page, count }));
+  const topRefs = Object.entries(refMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([ref, count]) => ({ ref, count }));
+  const result = { total: rows.length, today: today, last7: last7, uniqueSessions: sessSet.size, daily: daily, topPages: topPages, topRefs: topRefs, langs: langMap };
+  cacheSet_(key, result, VISITOR_CACHE_TTL);
+  return json_({ ok: true, ...result });
+}
+function getVisitorLogs_(body) {
+  requireSuperAdmin_(body.token);
+  const page = Math.max(1, parseInt(body.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(body.limit, 10) || 20));
+  const search = String(body.search || '').toLowerCase().trim();
+  const from = String(body.from || '').trim();
+  const to = String(body.to || '').trim();
+  let rows = getVisitorRows_().slice().reverse();
+  if (from) rows = rows.filter(r => String(r.values[1] || '') >= from);
+  if (to) rows = rows.filter(r => String(r.values[1] || '') <= to);
+  if (search) rows = rows.filter(r => r.values.join(' ').toLowerCase().includes(search));
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const start = (page - 1) * limit;
+  const chunk = rows.slice(start, start + limit).map(r => {
+    const v = r.values;
+    return { timestamp: v[0], tanggal: v[1], page: v[2], referrer: v[3], ua: v[4], bahasa: v[5], screen: v[6], sessionId: v[7] };
+  });
+  return json_({ ok: true, data: chunk, total: total, page: page, limit: limit, totalPages: totalPages });
+}
 function listUsers_(body) {
   requireAdmin_(body.token);
   return json_({ok:true, users:cachedData_('list_users', DATA_CACHE_TTL, function(){ return getRows_(getSheet_()).map(rowToUser_); })});
