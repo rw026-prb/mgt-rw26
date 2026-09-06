@@ -36,6 +36,8 @@ const ORG_HEADERS = ['ID','JABATAN','NAMA','FOTO'];
 const GALLERY_HEADERS = ['ID','Nama Album','Deskripsi','Folder ID','Tanggal','Status','Jumlah Foto','Thumbnail ID'];
 const VIDEO_SHEET_NAME = 'video';
 const VIDEO_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status','Autoplay'];
+const VIDEO_KEGIATAN_SHEET_NAME = 'video_kegiatan';
+const VIDEO_KEGIATAN_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status'];
 const VISITOR_SHEET_NAME = 'visitor_log';
 const VISITOR_HEADERS = ['Timestamp','Tanggal','Page','Referrer','UA','Bahasa','Screen','SessionId'];
 const VISITOR_CACHE_TTL = 60;
@@ -94,7 +96,8 @@ function invalidateData_(module) {
     users: ['list_users'],
     galeri: ['list_gallery_albums'],
     kas: ['list_kas'],
-    video: ['list_videos']
+    video: ['list_videos'],
+    video_kegiatan: ['list_video_kegiatan']
   };
   (staticKeys[module] || []).forEach(key => cache.remove(key));
   cache.remove('public_content');
@@ -182,6 +185,11 @@ function doPost(e) {
       case 'setVideoAutoplay': return setVideoAutoplay_(body);
       case 'clearVideoAutoplay': return clearVideoAutoplay_(body);
       case 'deleteVideo': return deleteVideo_(body);
+      case 'listVideoKegiatan': return listVideoKegiatan_(body);
+      case 'createVideoKegiatan': return createVideoKegiatan_(body);
+      case 'updateVideoKegiatan': return updateVideoKegiatan_(body);
+      case 'toggleVideoKegiatan': return toggleVideoKegiatan_(body);
+      case 'deleteVideoKegiatan': return deleteVideoKegiatan_(body);
       case 'logVisitor': return logVisitor_(body);
       case 'getVisitorStats': return getVisitorStats_(body);
       case 'getVisitorLogs': return getVisitorLogs_(body);
@@ -244,6 +252,10 @@ function refreshGalleryMetadata() {
   invalidateData_('galeri');
 }
 
+function setupVideoKegiatanSheet() {
+  ensureHeader_(getVideoKegiatanSheet_(), VIDEO_KEGIATAN_HEADERS);
+}
+
 function login_(body) {
   const identifier = String(body.identifier || '').trim().toLowerCase();
   const password = String(body.password || '');
@@ -304,7 +316,8 @@ function publicContentData_() {
     organization:organization,
     gallery: publicGalleryAlbums_(),
     statistik: getStatistikRows_().map(statistikRowToObject_),
-    videos: getVideoRows_().map(videoRowToObject_).filter(isActive_)
+    videos: getVideoRows_().map(videoRowToObject_).filter(isActive_),
+    videoKegiatan: getVideoKegiatanRows_().map(videoKegiatanRowToObject_).filter(isActive_)
   };
 }
 
@@ -785,6 +798,59 @@ function deleteVideo_(body) {
   logActivity_(requireSession_(body.token), 'delete', 'video', 'Menghapus video "' + found.values[1] + '"');
   invalidateData_('video');
   return json_({ok:true, message:'Video berhasil dihapus.'});
+}
+
+function listVideoKegiatan_(body) {
+  requireSession_(body.token);
+  return json_({ok:true, videoKegiatan:cachedData_('list_video_kegiatan', DATA_CACHE_TTL, function(){ return getVideoKegiatanRows_().map(videoKegiatanRowToObject_); })});
+}
+
+function createVideoKegiatan_(body) {
+  requireMenuAccess_(body.token, 'galeri');
+  const item = body.videoKegiatan || body.video || {};
+  const videoId = extractYoutubeId_(item.url);
+  if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
+  const status = item.status || 'Aktif';
+  const sheet = getVideoKegiatanSheet_();
+  const id = nextId_(getVideoKegiatanRows_().map(r => r.values), 'VK-');
+  sheet.appendRow([id, neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal || today_(), status]);
+  logActivity_(requireSession_(body.token), 'create', 'video_kegiatan', 'Menambah video kegiatan "' + item.judul + '"');
+  invalidateData_('video_kegiatan');
+  return json_({ok:true, id:id});
+}
+
+function updateVideoKegiatan_(body) {
+  requireMenuAccess_(body.token, 'galeri');
+  const item = body.videoKegiatan || body.video || {}, found = findVideoKegiatanRow_(item.id);
+  if (!found) throw new Error('Video kegiatan tidak ditemukan.');
+  const videoId = extractYoutubeId_(item.url);
+  if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
+  const status = item.status || found.values[5] || 'Aktif';
+  getVideoKegiatanSheet_().getRange(found.row,1,1,6).setValues([[found.values[0], neutralizeFormula_(item.judul), sanitizeHtml_(item.deskripsi || ''), neutralizeFormula_(item.url), item.tanggal || found.values[4], status]]);
+  logActivity_(requireSession_(body.token), 'update', 'video_kegiatan', 'Memperbarui video kegiatan "' + item.judul + '"');
+  invalidateData_('video_kegiatan');
+  return json_({ok:true});
+}
+
+function toggleVideoKegiatan_(body) {
+  requireMenuAccess_(body.token, 'galeri');
+  const found = findVideoKegiatanRow_(body.id);
+  if (!found) throw new Error('Video kegiatan tidak ditemukan.');
+  const status = String(found.values[5]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
+  getVideoKegiatanSheet_().getRange(found.row,6).setValue(status);
+  logActivity_(requireSession_(body.token), 'toggle', 'video_kegiatan', 'Mengubah status video kegiatan "' + found.values[1] + '" ke ' + status);
+  invalidateData_('video_kegiatan');
+  return json_({ok:true, status:status});
+}
+
+function deleteVideoKegiatan_(body) {
+  requireMenuAccess_(body.token, 'galeri');
+  const found = findVideoKegiatanRow_(body.id);
+  if (!found) throw new Error('Video kegiatan tidak ditemukan.');
+  getVideoKegiatanSheet_().deleteRow(found.row);
+  logActivity_(requireSession_(body.token), 'delete', 'video_kegiatan', 'Menghapus video kegiatan "' + found.values[1] + '"');
+  invalidateData_('video_kegiatan');
+  return json_({ok:true, message:'Video kegiatan berhasil dihapus.'});
 }
 
 function listAnnouncements_(body) {
@@ -1674,6 +1740,7 @@ function getHimbauanSheet_() { return openSheet_(HIMBAUAN_SPREADSHEET_ID, HIMBAU
 function getInfoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, INFO_SHEET_NAME); }
 function getNewsSheet_() { return openSheet_(INFO_SPREADSHEET_ID, NEWS_SHEET_NAME); }
 function getVideoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, VIDEO_SHEET_NAME); }
+function getVideoKegiatanSheet_() { return openSheet_(GALLERY_SPREADSHEET_ID, VIDEO_KEGIATAN_SHEET_NAME); }
 function getFacilitySheet_() { return openSheet_(FASUM_SPREADSHEET_ID, FASUM_SHEET_NAME); }
 function getOrgSheet_(name) { return openSheet_(ORG_SPREADSHEET_ID, name); }
 function openSheet_(spreadsheetId, sheetName) { const ss=SpreadsheetApp.openById(spreadsheetId); let sheet=ss.getSheetByName(sheetName); if(!sheet) sheet=ss.insertSheet(sheetName); return sheet; }
@@ -1691,6 +1758,9 @@ function announcementRowToObject_(row) { const v=row.values; return {id:v[0],jud
 function getVideoRows_() { return getTableRows_(getVideoSheet_(), 7, false); }
 function findVideoRow_(id) { const rows=getVideoRows_(), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
 function videoRowToObject_(row) { const v=row.values; const ap=String(v[6]||'').toLowerCase(); return {id:v[0],judul:v[1],deskripsi:v[2],url:v[3],tanggal:v[4],status:v[5],autoplay:ap==='ya'||ap==='true'||ap==='1',videoId:extractYoutubeId_(v[3])}; }
+function getVideoKegiatanRows_() { return getTableRows_(getVideoKegiatanSheet_(), 6, false); }
+function findVideoKegiatanRow_(id) { const rows=getVideoKegiatanRows_(), index=rows.findIndex(r=>String(r.values[0])===String(id)); return index<0?null:rows[index]; }
+function videoKegiatanRowToObject_(row) { const v=row.values; return {id:v[0],judul:v[1],deskripsi:v[2],url:v[3],tanggal:v[4],status:v[5],videoId:extractYoutubeId_(v[3])}; }
 function clearAllVideoAutoplay_(){ const sheet=getVideoSheet_(), last=sheet.getLastRow(); if(last<2) return; const n=last-1; const vals=sheet.getRange(2,7,n,1).getValues(); let dirty=false; for(let i=0;i<n;i++){ if(String(vals[i][0]).trim()!==''){ vals[i][0]=''; dirty=true; } } if(dirty) sheet.getRange(2,7,n,1).setValues(vals); }
 function extractYoutubeId_(url) {
   const text = String(url || '');
