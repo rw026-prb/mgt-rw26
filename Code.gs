@@ -1275,7 +1275,7 @@ function kasTimestamp_(tanggal) {
 }
 
 function listKas_(body) {
-  var session = requireSession_(body.token);
+  var session = requireMenuAccess_(body.token, 'kas');
   const allRows = cachedData_('list_kas', DATA_CACHE_TTL, function () {
     return getKasRows_().map(kasRowToObject_).sort((a, b) => kasTimestamp_(b.tanggal) - kasTimestamp_(a.tanggal));
   });
@@ -1290,7 +1290,7 @@ function listKas_(body) {
 }
 
 function refreshKas_(body) {
-  requireSession_(body.token);
+  requireMenuAccess_(body.token, 'kas');
   invalidateData_('kas');
   return json_({ ok: true });
 }
@@ -1299,10 +1299,14 @@ function createKas_(body) {
   var session = requireMenuAccess_(body.token, 'kas');
   const item = body.kas || {};
   if (!item.tanggal || !item.uraian || !item.nominal || !item.jenis_form) throw new Error('Tanggal, uraian, nominal, dan jenis transaksi wajib diisi.');
+  if (item.jenis_form !== 'masuk' && item.jenis_form !== 'keluar') throw new Error('Jenis transaksi tidak valid.');
+  const nominal = parseInt(item.nominal, 10);
+  if (!isFinite(nominal) || nominal <= 0) throw new Error('Nominal harus angka lebih dari 0.');
+  if (!['Tunai', 'Transfer'].includes(item.metode || 'Tunai')) throw new Error('Metode pembayaran tidak valid.');
   const sheet = getKasSheet_();
   const nextRow = sheet.getLastRow() + 1;
 
-  let linkFormula = '-';
+  let linkFormula = '';
   if (item.fileData && item.fileName) {
     const match = String(item.fileData).match(/^data:([^;]+);base64,(.+)$/);
     if (match) {
@@ -1332,7 +1336,11 @@ function createKas_(body) {
   } else {
     sheet.getRange(nextRow, 10).setFormula('=$J' + (nextRow - 1) + '+IF(L' + nextRow + '="Disetujui";G' + nextRow + '-H' + nextRow + ';0)');
   }
-  sheet.getRange(nextRow, 11).setFormula(linkFormula);
+  if (linkFormula) {
+    sheet.getRange(nextRow, 11).setFormula(linkFormula);
+  } else {
+    sheet.getRange(nextRow, 11).setValue('-');
+  }
   sheet.getRange(nextRow, 12).setValue('Menunggu');
   sheet.getRange(nextRow, 13).setValue(session.nama);
 
@@ -1347,6 +1355,9 @@ function updateKas_(body) {
   const targetRow = parseInt(item.rowNum, 10);
   if (!targetRow || targetRow < 2) throw new Error('Baris data tidak valid.');
   const sheet = getKasSheet_();
+  if (!item.tanggal || !item.uraian || !item.nominal || !item.jenis_form) throw new Error('Tanggal, uraian, nominal, dan jenis transaksi wajib diisi.');
+  if (item.jenis_form !== 'masuk' && item.jenis_form !== 'keluar') throw new Error('Jenis transaksi tidak valid.');
+  if (!isFinite(parseInt(item.nominal, 10)) || parseInt(item.nominal, 10) <= 0) throw new Error('Nominal harus angka lebih dari 0.');
 
   if (!['Super Admin', 'Admin'].includes(session.role)) {
     const currentStatus = String(sheet.getRange(targetRow, 12).getValue() || 'Menunggu');
@@ -1485,7 +1496,7 @@ function rejectKas_(body) {
 }
 
 function getKasReport_(body) {
-  requireSession_(body.token);
+  requireMenuAccess_(body.token, 'kas');
   try {
     const targetBulan = parseInt(body.bulan, 10), targetTahun = parseInt(body.tahun, 10);
     const key = versionedKey_('kas', 'report_' + targetTahun + '_' + targetBulan);
@@ -1500,7 +1511,7 @@ function getKasReport_(body) {
 }
 
 function getKasDashboard_(body) {
-  var session = requireSession_(body.token);
+  var session = requireMenuAccess_(body.token, 'kas');
   const key = versionedKey_('kas', 'dash_' + session.userId);
   const data = cachedData_(key, DATA_CACHE_TTL, function () { return kasDashboardData_(session); });
   return json_({ ok: true, ...data });
@@ -1557,7 +1568,7 @@ function dashboardData_(body) {
 }
 
 function getKasCashFlow_(body) {
-  requireSession_(body.token);
+  requireMenuAccess_(body.token, 'kas');
   try {
     const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
     if (lastRow < 2) return json_({ ok: true, data: [] });
