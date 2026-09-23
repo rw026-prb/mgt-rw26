@@ -1279,13 +1279,28 @@ function listKas_(body) {
   const allRows = cachedData_('list_kas', DATA_CACHE_TTL, function () {
     return getKasRows_().map(kasRowToObject_).sort((a, b) => kasTimestamp_(b.tanggal) - kasTimestamp_(a.tanggal));
   });
-  const total = allRows.length;
+  const statusFilter = String(body.status || '').trim();
+  const q = String(body.q || '').trim().toLowerCase();
+  let rows = allRows;
+  if (statusFilter === 'Menunggu' || statusFilter === 'Disetujui' || statusFilter === 'Ditolak') {
+    rows = rows.filter(r => r.status === statusFilter);
+  }
+  if (q) {
+    const words = q.split(/\s+/).filter(w => w);
+    if (words.length) {
+      rows = rows.filter(r => {
+        const hay = String(r.uraian || '').toLowerCase();
+        return words.every(w => hay.indexOf(w) !== -1);
+      });
+    }
+  }
+  const total = rows.length;
   const perPage = Math.max(1, Math.min(50, parseInt(body.perPage, 10) || 10));
   const totalPages = Math.ceil(total / perPage) || 1;
   const requestedPage = Math.max(1, parseInt(body.page, 10) || 1);
   const page = Math.min(requestedPage, totalPages);
   const start = (page - 1) * perPage;
-  const data = allRows.slice(start, start + perPage);
+  const data = rows.slice(start, start + perPage);
   return json_({ ok: true, data, total, page, perPage, totalPages, userRole: session.role, userId: session.userId, userNama: session.nama });
 }
 
