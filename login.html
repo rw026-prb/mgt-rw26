@@ -120,7 +120,7 @@ if (
       alertEl.classList.add('d-none');successEl.classList.add('d-none');
       btn.disabled=true;btn.querySelector('.reset-btn-label').classList.add('d-none');btn.querySelector('.reset-spinner').classList.remove('d-none');
       try{
-        const res=await api({action:'requestPasswordReset',email:document.getElementById('resetEmail').value.trim(),siteUrl:window.location.origin});
+        const res=await api({action:'requestPasswordReset',email:document.getElementById('resetEmail').value.trim()});
         successEl.textContent=res.message;successEl.classList.remove('d-none');
         document.getElementById('forgotPasswordForm').reset();
       }catch(err){alertEl.textContent=err.message;alertEl.classList.remove('d-none');}

@@ -41,10 +41,15 @@ const VIDEO_KEGIATAN_HEADERS = ['ID','Judul','Deskripsi','URL','Tanggal','Status
 const VISITOR_SHEET_NAME = 'visitor_log';
 const VISITOR_HEADERS = ['Timestamp','Tanggal','Page','Referrer','UA','Bahasa','Screen','SessionId'];
 const VISITOR_CACHE_TTL = 60;
+const SITE_ORIGIN = 'https://mgt.rw026.my.id';
 const SESSION_SECONDS = 1800;
 const DATA_CACHE_TTL = 120;
-const PUBLIC_CACHE_TTL = 600;
-const GALLERY_CACHE_TTL = 600;
+const PUBLIC_CACHE_TTL = 1800;
+const GALLERY_CACHE_TTL = 1800;
+const LKG_PREFIX = 'lkg_';
+const LKG_TTL = 21600;
+const PENDING_PREFIX = 'pend_';
+const PENDING_TTL = 30;
 
 function cacheGet_(key) {
   const raw = CacheService.getScriptCache().get(key);
@@ -61,21 +66,27 @@ function cacheSet_(key, value, ttl) {
   }
 }
 
-function cachedData_(key, ttl, compute) {
+function cachedData_(key, ttl, compute, fallback) {
   const hit = cacheGet_(key);
   if (hit !== undefined) return hit;
+  const lkgKey = LKG_PREFIX + key;
   const lock = LockService.getScriptLock();
-  if (lock.tryLock(5000)) {
+  if (lock.tryLock(1200)) {
     try {
       const refreshed = cacheGet_(key);
       if (refreshed !== undefined) return refreshed;
       const data = compute();
       cacheSet_(key, data, ttl);
+      cacheSet_(lkgKey, data, LKG_TTL);
       return data;
     } finally {
       lock.releaseLock();
     }
   }
+  const lkg = cacheGet_(lkgKey);
+  if (lkg !== undefined) return lkg;
+  if (cacheGet_(PENDING_PREFIX + key) !== undefined) return fallback === undefined ? null : fallback;
+  cacheSet_(PENDING_PREFIX + key, '1', PENDING_TTL);
   return compute();
 }
 
@@ -94,7 +105,7 @@ function invalidateData_(module) {
     organisasi: ['list_organization'],
     statistik: ['list_statistik'],
     users: ['list_users'],
-    galeri: ['list_gallery_albums'],
+    galeri: ['list_gallery_albums', 'public_gallery_albums'],
     kas: ['list_kas'],
     video: ['list_videos'],
     video_kegiatan: ['list_video_kegiatan']
@@ -110,8 +121,9 @@ function doGet(e) {
     const action = e && e.parameter && e.parameter.action;
     if (action === 'publicContent') return publicContent_();
     if (action === 'publicKasReport') return publicKasReport_(e.parameter);
+    if (action === 'publicKasCashFlow') return publicKasCashFlow_(e.parameter);
     if (action === 'publicGalleryPhotos') return publicGalleryPhotos_(e.parameter);
-    if (action === 'logVisitor') return logVisitor_(e.parameter);
+    if (action === 'logVisitor' && e.parameter.token) return logVisitor_(e.parameter);
     if (action === 'getVisitorStats') return json_({ok:false, message:'Gunakan POST.'});
     if (action === 'getVisitorLogs') return json_({ok:false, message:'Gunakan POST.'});
     return json_({ok:true, service:'Portal RW 26 API', time:formatDate_(new Date())});
@@ -128,6 +140,7 @@ function doPost(e) {
       case 'logout': return logout_(body);
       case 'publicContent': return publicContent_();
       case 'publicKasReport': return publicKasReport_(body);
+      case 'publicKasCashFlow': return publicKasCashFlow_(body);
       case 'listUsers': return listUsers_(body);
       case 'createUser': return createUser_(body);
       case 'updateUser': return updateUser_(body);
@@ -204,28 +217,28 @@ function doPost(e) {
 }
 
 function setupSheet() {
-  const sheet = getSheet_();
+  const sheet = getSheet_(true);
   ensureHeader_(sheet, HEADERS);
 }
 
 function setupHimbauanSheet() {
-  const sheet = getHimbauanSheet_();
+  const sheet = getHimbauanSheet_(true);
   ensureHeader_(sheet, HIMBAUAN_HEADERS);
 }
 
 function setupPortalSheets() {
-  ensureHeader_(getInfoSheet_(), INFO_HEADERS);
-  ensureHeader_(getNewsSheet_(), NEWS_HEADERS);
-  ensureHeader_(getFacilitySheet_(), FASUM_HEADERS);
-  ORG_SHEET_NAMES.forEach(name => ensureHeader_(getOrgSheet_(name), ORG_HEADERS));
+  ensureHeader_(getInfoSheet_(true), INFO_HEADERS);
+  ensureHeader_(getNewsSheet_(true), NEWS_HEADERS);
+  ensureHeader_(getFacilitySheet_(true), FASUM_HEADERS);
+  ORG_SHEET_NAMES.forEach(name => ensureHeader_(getOrgSheet_(name, true), ORG_HEADERS));
 }
 
 function setupGallerySheet() {
-  ensureHeader_(getGallerySheet_(), GALLERY_HEADERS);
+  ensureHeader_(getGallerySheet_(true), GALLERY_HEADERS);
 }
 
 function setupVideoSheet() {
-  ensureHeader_(getVideoSheet_(), VIDEO_HEADERS);
+  ensureHeader_(getVideoSheet_(true), VIDEO_HEADERS);
 }
 
 function refreshGalleryMetadata() {
@@ -253,7 +266,53 @@ function refreshGalleryMetadata() {
 }
 
 function setupVideoKegiatanSheet() {
-  ensureHeader_(getVideoKegiatanSheet_(), VIDEO_KEGIATAN_HEADERS);
+  ensureHeader_(getVideoKegiatanSheet_(true), VIDEO_KEGIATAN_HEADERS);
+}
+
+function setupAllSheets() {
+  setupSheet();
+  setupHimbauanSheet();
+  setupPortalSheets();
+  setupGallerySheet();
+  setupVideoSheet();
+  setupVideoKegiatanSheet();
+  ensureHeader_(getStatistikSheet_(true), STATISTIK_HEADERS);
+  ensureHeader_(getVisitorSheet_(true), VISITOR_HEADERS);
+  ensureHeader_(getActivityLogSheet_(true), ACTIVITY_LOG_HEADERS);
+  const kas = SpreadsheetApp.openById(KAS_SPREADSHEET_ID).getSheetByName(KAS_SHEET_NAME);
+  if (!kas) console.warn('Sheet "' + KAS_SHEET_NAME + '" belum ada di spreadsheet kas - buat manual bila kas dipakai.');
+  console.log('setupAllSheets selesai. Sheets siap dipakai.');
+}
+
+function warmCache() {
+  const started = Date.now();
+  const stats = {};
+  const now = new Date();
+  const nowYear = now.getFullYear();
+
+  try { publicContent_(); stats.publicContent = 'ok'; }
+  catch (e) { stats.publicContent = e.message; }
+
+  const prior = new Date(nowYear, now.getMonth() - 2, 1);
+  try { publicKasCashFlow_({ bulanAwal: 0, tahunAwal: prior.getFullYear(), bulanAkhir: now.getMonth(), tahunAkhir: nowYear }); stats.arusKas = 'ok'; }
+  catch (e) { stats.arusKas = e.message; }
+
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(nowYear, now.getMonth() - i, 1);
+    const label = 'kas_' + d.getFullYear() + '_' + d.getMonth();
+    try { publicKasReport_({ bulan: d.getMonth(), tahun: d.getFullYear() }); stats[label] = 'ok'; }
+    catch (e) { stats[label] = e.message; }
+  }
+
+  console.log('warmCache selesai dalam ' + (Date.now() - started) + 'ms - ' + JSON.stringify(stats));
+}
+
+function installWarmTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'warmCache') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('warmCache').timeBased().everyMinutes(10).create();
+  console.log('Trigger warmCache terpasang: setiap 10 menit.');
 }
 
 function login_(body) {
@@ -264,13 +323,13 @@ function login_(body) {
   const failKey = 'login_fail_' + identifier;
   const failCount = parseInt(cache.get(failKey) || '0', 10);
   if (failCount >= 5) throw new Error('Terlalu banyak percobaan gagal. Akun dikunci sementara, coba lagi dalam 10 menit.');
-  const sheet = getSheet_(), rows = getRows_(sheet);
-  const index = rows.findIndex(r => String(r[0]).toLowerCase() === identifier || String(r[2]).toLowerCase() === identifier);
-  if (index < 0) {
+  const sheet = getSheet_(), rows = getUserRows_();
+  const found = rows.find(r => String(r.values[0]).toLowerCase() === identifier || String(r.values[2]).toLowerCase() === identifier);
+  if (!found) {
     cache.put(failKey, String(failCount + 1), 600);
     throw new Error('User ID/email atau password salah.');
   }
-  const row = rows[index];
+  const rowNumber = found.row, row = found.values;
   if (String(row[6]).toLowerCase() !== 'aktif') throw new Error('Akun sedang nonaktif. Hubungi administrator.');
   const stored = String(row[7] || '');
   if (!verifyPassword_(password, stored)) {
@@ -278,7 +337,6 @@ function login_(body) {
     throw new Error('User ID/email atau password salah. Percobaan ' + (failCount + 1) + '/5.');
   }
   cache.remove(failKey);
-  const rowNumber = index + 2;
   const now = formatDate_(new Date());
   if (stored.indexOf('pbkdf2$') !== 0) {
     sheet.getRange(rowNumber, 8, 1, 2).setValues([[hashPassword_(password), now]]);
@@ -288,36 +346,61 @@ function login_(body) {
   const token = Utilities.getUuid() + Utilities.getUuid();
   const user = rowToUser_(row); user.loginTerakhir = now;
   cache.put('session_' + token, JSON.stringify(user), SESSION_SECONDS);
+  indexSession_(user.userId, token);
   logActivity_(user, 'login', 'auth', user.nama + ' login ke portal');
   return json_({ok:true, token:token, user:user, expiresAt:Date.now() + SESSION_SECONDS * 1000});
 }
 
 function logout_(body) {
-  if (body.token) CacheService.getScriptCache().remove('session_' + body.token);
+  if (body.token) {
+    let userId = '';
+    try { userId = requireSession_(body.token).userId; } catch (e) {}
+    unindexSession_(userId, body.token);
+    CacheService.getScriptCache().remove('session_' + body.token);
+  }
   return json_({ok:true});
 }
 
 function publicContent_() {
-  return json_(cachedData_('public_content', PUBLIC_CACHE_TTL, publicContentData_));
+  const empty = emptyPublicContent_();
+  const data = cachedData_('public_content', PUBLIC_CACHE_TTL, publicContentData_, empty);
+  if (!data || !data.ok) return json_(empty);
+  return json_(data);
+}
+
+function emptyPublicContent_() {
+  const organization = {};
+  ORG_SHEET_NAMES.forEach(name => { organization[name] = []; });
+  return {
+    ok: true,
+    himbauan: [],
+    announcements: [],
+    news: [],
+    facilities: [],
+    organization: organization,
+    gallery: [],
+    statistik: [],
+    videos: [],
+    videoKegiatan: []
+  };
 }
 
 function publicContentData_() {
-  const organization = {};
-  ORG_SHEET_NAMES.forEach(name => {
-    organization[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r));
-  });
-  
   return {
-    ok:true,
-    himbauan:getHimbauanRows_().map(himbauanRowToObject_).filter(isActive_),
-    announcements:getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_).filter(isActive_),
-    news:getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_).filter(isActive_),
-    facilities:getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_),
-    organization:organization,
-    gallery: publicGalleryAlbums_(),
-    statistik: getStatistikRows_().map(statistikRowToObject_),
-    videos: getVideoRows_().map(videoRowToObject_).filter(isActive_),
-    videoKegiatan: getVideoKegiatanRows_().map(videoKegiatanRowToObject_).filter(isActive_)
+    ok: true,
+    himbauan: cachedData_('list_himbauan', DATA_CACHE_TTL, function () { return getHimbauanRows_().map(himbauanRowToObject_); }, []).filter(isActive_),
+    announcements: cachedData_('list_announcements', DATA_CACHE_TTL, function () { return getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_); }, []).filter(isActive_),
+    news: cachedData_('list_news', DATA_CACHE_TTL, function () { return getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_); }, []).filter(isActive_),
+    facilities: cachedData_('list_facilities', DATA_CACHE_TTL, function () { return getTableRows_(getFacilitySheet_(), 5).map(facilityRowToObject_); }, []),
+    organization: cachedData_('list_organization', DATA_CACHE_TTL, function () {
+      const g = {};
+      ORG_SHEET_NAMES.forEach(name => { g[name] = getTableRows_(getOrgSheet_(name), 4).map(r => orgRowToObject_(name, r)); });
+      return g;
+    }, {}),
+    gallery: cachedData_('public_gallery_albums', GALLERY_CACHE_TTL, publicGalleryAlbums_, []),
+    statistik: cachedData_('list_statistik', DATA_CACHE_TTL, function () { return getStatistikRows_().map(statistikRowToObject_); }, []),
+    videos: cachedData_('list_videos', DATA_CACHE_TTL, function () { return getVideoRows_().map(videoRowToObject_); }, []).filter(isActive_),
+    videoKegiatan: cachedData_('list_video_kegiatan', DATA_CACHE_TTL, function () { return getVideoKegiatanRows_().map(videoKegiatanRowToObject_); }, []).filter(isActive_)
   };
 }
 
@@ -356,17 +439,28 @@ function publicGalleryPhotos_(params) {
       console.warn('Galeri gagal dimuat untuk ' + album.id + ': ' + e.message);
       throw new Error('Foto album belum dapat dimuat.');
     }
-  });
+  }, []);
   return json_({ ok: true, album: { id: album.id, nama: album.nama }, photos: photos });
+}
+
+function clampMonth_(raw, fallback) {
+  const n = parseInt(raw, 10);
+  if (isNaN(n)) return Math.min(11, Math.max(0, fallback));
+  return Math.min(11, Math.max(0, n));
+}
+
+function clampYear_(raw, fallback, minOffset, maxOffset) {
+  const n = parseInt(raw, 10);
+  const nowYear = new Date().getFullYear();
+  if (isNaN(n)) return nowYear + fallback;
+  return Math.min(nowYear + maxOffset, Math.max(nowYear + minOffset, n));
 }
 
 function publicKasReport_(params) {
   try {
     const now = new Date();
-    const targetBulan = parseInt(params && params.bulan, 10);
-    const targetTahun = parseInt(params && params.tahun, 10);
-    const bulan = isNaN(targetBulan) ? now.getMonth() : targetBulan;
-    const tahun = isNaN(targetTahun) ? now.getFullYear() : targetTahun;
+    const bulan = clampMonth_(params && params.bulan, now.getMonth());
+    const tahun = clampYear_(params && params.tahun, 0, -2, 1);
     const key = versionedKey_('kas', 'pub_' + tahun + '_' + bulan);
     const data = cachedData_(key, PUBLIC_CACHE_TTL, function () {
       const r = kasReportData_(bulan, tahun);
@@ -375,7 +469,7 @@ function publicKasReport_(params) {
         saldoAkhir: r.saldoAkhir, rincianMasuk: r.rincianMasuk, rincianKeluar: r.rincianKeluar,
         updatedAt: (r.latestTimestamp || new Date()).toISOString()
       };
-    });
+    }, { saldoAwal: 0, totalMasuk: 0, totalKeluar: 0, saldoAkhir: 0, rincianMasuk: [], rincianKeluar: [], updatedAt: new Date().toISOString() });
     return json_({ ok: true, ...data });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
@@ -427,7 +521,7 @@ function kasReportData_(bulan, tahun) {
   return { saldoAwal: saldoAwal, totalMasuk: totalMasuk, totalKeluar: totalKeluar, saldoAkhir: saldoAkhir, rincianMasuk: rincianMasuk, rincianKeluar: rincianKeluar, latestTimestamp: latestTimestamp };
 }
 
-function getVisitorSheet_() { return openSheet_(USER_SPREADSHEET_ID, VISITOR_SHEET_NAME); }
+function getVisitorSheet_(create) { return openSheet_(USER_SPREADSHEET_ID, VISITOR_SHEET_NAME, create); }
 function getVisitorRows_() {
   const sheet = getVisitorSheet_();
   const last = sheet.getLastRow();
@@ -556,8 +650,12 @@ function updateUser_(body) {
   if (actor.role !== 'Super Admin' && u.role === 'Super Admin') throw new Error('Hanya Super Admin yang dapat mengubah role ke Super Admin.');
   const passwordHash = u.password ? hashPassword_(u.password) : current[7];
   const menuAkses = u.role === 'Editor' ? JSON.stringify(u.menuAkses || JSON.parse(current[10] || '[]')) : (current[10] || '[]');
-  sheet.getRange(found.row,1,1,11).setValues([[current[0], neutralizeFormula_(u.nama || current[1]), neutralizeFormula_(u.email || current[2]), neutralizeFormula_(u.noHp || ''), u.role || current[4], neutralizeFormula_(u.wilayah || current[5]), u.status || current[6], passwordHash, current[8], current[9], menuAkses]]);
+  const nextRole = u.role || current[4], nextStatus = u.status || current[6];
+  const passwordChanged = !!u.password;
+  sheet.getRange(found.row,1,1,11).setValues([[current[0], neutralizeFormula_(u.nama || current[1]), neutralizeFormula_(u.email || current[2]), neutralizeFormula_(u.noHp || ''), nextRole, neutralizeFormula_(u.wilayah || current[5]), nextStatus, passwordHash, current[8], current[9], menuAkses]]);
   logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + (u.nama || current[1]));
+  const privilegeChanged = nextRole !== current[4] || nextStatus !== current[6];
+  if (actor.userId !== found.values[0] || privilegeChanged || passwordChanged) invalidateUserSessions_(found.values[0]);
   invalidateData_('users');
   return json_({ok:true, message:'Data pengguna diperbarui.'});
 }
@@ -570,6 +668,7 @@ function toggleUser_(body) {
   const status = String(found.values[6]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
   getSheet_().getRange(found.row,7).setValue(status);
   logActivity_(actor, 'toggle', 'users', 'Mengubah status ' + found.values[1] + ' ke ' + status);
+  invalidateUserSessions_(found.values[0]);
   invalidateData_('users');
   return json_({ok:true, status:status});
 }
@@ -581,6 +680,7 @@ function deleteUser_(body) {
   if (actor.role !== 'Super Admin' && found.values[4] === 'Super Admin') throw new Error('Anda tidak memiliki izin untuk menghapus Super Admin.');
   getSheet_().deleteRow(found.row);
   logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + found.values[1]);
+  invalidateUserSessions_(found.values[0]);
   invalidateData_('users');
   return json_({ok:true, message:'Pengguna berhasil dihapus.'});
 }
@@ -607,6 +707,7 @@ function updateMyProfile_(body) {
     if (profile.newPassword.length < 8) throw new Error('Password baru minimal 8 karakter.');
     if (profile.newPassword !== profile.confirmPassword) throw new Error('Konfirmasi password baru tidak cocok.');
     getSheet_().getRange(found.row, 8).setValue(newHash);
+    invalidateUserSessions_(user.userId, body.token);
   }
   const updatedRow = getRows_(getSheet_()).find(r => String(r[0]) === user.userId);
   const updatedUser = updatedRow ? rowToUser_(updatedRow) : user;
@@ -629,12 +730,11 @@ function requestPasswordReset_(body) {
   const token = Utilities.getUuid();
   const cacheData = JSON.stringify({userId: userId, email: email, nama: nama});
   CacheService.getScriptCache().put('reset_' + token, cacheData, 900);
-  const siteUrl = String(body.siteUrl || '').replace(/\/+$/, '');
-  const resetUrl = siteUrl + '/reset.html?token=' + token;
+  const resetUrl = SITE_ORIGIN + '/reset.html?token=' + token;
   const htmlBody = '<div style="font-family:DM Sans,Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f9fafb;border-radius:16px;border:1px solid #e5e7eb;">' +
     '<div style="text-align:center;margin-bottom:24px;"><div style="display:inline-block;width:48px;height:48px;border-radius:14px;background:#e9b949;color:#064b3b;font-size:1.3rem;line-height:48px;font-weight:700;">RW</div></div>' +
     '<h2 style="text-align:center;color:#1a1a1a;font-size:1.3rem;margin-bottom:8px;">Reset Password</h2>' +
-    '<p style="text-align:center;color:#6b7280;font-size:0.9rem;margin-bottom:24px;">Halo <strong>' + nama + '</strong>, Anda meminta reset password untuk akun Portal RW 26.</p>' +
+    '<p style="text-align:center;color:#6b7280;font-size:0.9rem;margin-bottom:24px;">Halo <strong>' + escapeHtml_(nama) + '</strong>, Anda meminta reset password untuk akun Portal RW 26.</p>' +
     '<div style="text-align:center;margin-bottom:24px;"><a href="' + resetUrl + '" style="display:inline-block;padding:14px 32px;background:#0a6c50;color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:0.95rem;">Buat Password Baru</a></div>' +
     '<p style="color:#6b7280;font-size:0.8rem;text-align:center;margin-bottom:8px;">Link ini berlaku selama <strong>15 menit</strong>.</p>' +
     '<p style="color:#9ca3af;font-size:0.78rem;text-align:center;border-top:1px solid #e5e7eb;padding-top:16px;margin-top:16px;">Jika Anda tidak meminta reset password, abaikan email ini. Password Anda tidak akan berubah.</p>' +
@@ -667,6 +767,7 @@ function resetPassword_(body) {
   const newHash = hashPassword_(newPassword);
   getSheet_().getRange(found.row, 8).setValue(newHash);
   CacheService.getScriptCache().remove('reset_' + token);
+  invalidateUserSessions_(data.userId);
   logActivity_({userId: data.userId, nama: data.nama, role: found.values[4] || ''}, 'update', 'auth', data.nama + ' berhasil reset password');
   invalidateData_('users');
   return json_({ok: true, message: 'Password berhasil diubah. Silakan login dengan password baru.'});
@@ -806,7 +907,7 @@ function listVideoKegiatan_(body) {
 }
 
 function createVideoKegiatan_(body) {
-  requireMenuAccess_(body.token, 'galeri');
+  requireMenuAccess_(body.token, 'videoKegiatan');
   const item = body.videoKegiatan || body.video || {};
   const videoId = extractYoutubeId_(item.url);
   if (!item.judul || !videoId) throw new Error('Judul dan URL YouTube yang valid wajib diisi.');
@@ -820,7 +921,7 @@ function createVideoKegiatan_(body) {
 }
 
 function updateVideoKegiatan_(body) {
-  requireMenuAccess_(body.token, 'galeri');
+  requireMenuAccess_(body.token, 'videoKegiatan');
   const item = body.videoKegiatan || body.video || {}, found = findVideoKegiatanRow_(item.id);
   if (!found) throw new Error('Video kegiatan tidak ditemukan.');
   const videoId = extractYoutubeId_(item.url);
@@ -833,7 +934,7 @@ function updateVideoKegiatan_(body) {
 }
 
 function toggleVideoKegiatan_(body) {
-  requireMenuAccess_(body.token, 'galeri');
+  requireMenuAccess_(body.token, 'videoKegiatan');
   const found = findVideoKegiatanRow_(body.id);
   if (!found) throw new Error('Video kegiatan tidak ditemukan.');
   const status = String(found.values[5]).toLowerCase() === 'aktif' ? 'Nonaktif' : 'Aktif';
@@ -844,7 +945,7 @@ function toggleVideoKegiatan_(body) {
 }
 
 function deleteVideoKegiatan_(body) {
-  requireMenuAccess_(body.token, 'galeri');
+  requireMenuAccess_(body.token, 'videoKegiatan');
   const found = findVideoKegiatanRow_(body.id);
   if (!found) throw new Error('Video kegiatan tidak ditemukan.');
   getVideoKegiatanSheet_().deleteRow(found.row);
@@ -1108,9 +1209,8 @@ function deleteGalleryAlbum_(body) {
 }
 
 function listGalleryPhotos_(body) {
-  requireSession_(body.token);
-  if (!body.folderId) throw new Error('Folder ID wajib diisi.');
-  const folder = DriveApp.getFolderById(body.folderId);
+  requireMenuAccess_(body.token, 'galeri');
+  const folder = assertGalleryFolder_(body.folderId);
   const files = folder.getFiles();
   const photos = [];
   while (files.hasNext()) {
@@ -1133,12 +1233,12 @@ function listGalleryPhotos_(body) {
 
 function uploadGalleryPhoto_(body) {
   requireMenuAccess_(body.token, 'galeri');
-  if (!body.folderId || !body.dataUrl || !body.fileName) throw new Error('Folder ID, file, dan nama file wajib diisi.');
+  if (!body.dataUrl || !body.fileName) throw new Error('File dan nama file wajib diisi.');
   const match = String(body.dataUrl).match(/^data:([^;]+);base64,(.+)$/);
   if (!match) throw new Error('Format file gambar tidak valid.');
   const allowed = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'];
   if (allowed.indexOf(match[1]) < 0) throw new Error('Gunakan file SVG, PNG, JPG, WebP, atau GIF.');
-  const folder = DriveApp.getFolderById(body.folderId);
+  const folder = assertGalleryFolder_(body.folderId);
   const safeName = sanitizeFileName_(body.fileName);
   const blob = Utilities.newBlob(Utilities.base64Decode(match[2]), match[1], safeName);
   const file = folder.createFile(blob);
@@ -1152,7 +1252,9 @@ function uploadGalleryPhoto_(body) {
       const cur = parseInt(albumRows[idx].values[6] || '0', 10) + 1;
       sheet.getRange(rowNum, 7).setValue(cur);
       if (!String(albumRows[idx].values[7] || '')) sheet.getRange(rowNum, 8).setValue(file.getId());
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Metadata album gagal diperbarui: ' + e.message);
+    }
   }
   invalidateData_('galeri');
   return json_({ ok: true, message: 'Foto berhasil diupload.', fileId: file.getId(), url: file.getUrl() });
@@ -1161,43 +1263,42 @@ function uploadGalleryPhoto_(body) {
 function deleteGalleryPhoto_(body) {
   requireMenuAccess_(body.token, 'galeri');
   if (!body.fileId) throw new Error('File ID wajib diisi.');
-  let parentFolderId = '';
-  try {
-    const parents = DriveApp.getFileById(body.fileId).getParents();
-    if (parents.hasNext()) parentFolderId = parents.next().getId();
-  } catch (e) {}
-  try { DriveApp.getFileById(body.fileId).setTrashed(true); } catch (e) {}
-  if (parentFolderId) {
-    const albumRows = getGalleryRows_();
-    const idx = albumRows.findIndex(r => String(r.values[3]) === parentFolderId);
-    if (idx >= 0) {
-      try {
-        const sheet = getGallerySheet_();
-        const rowNum = albumRows[idx].row;
-        const cur = Math.max(0, parseInt(albumRows[idx].values[6] || '0', 10) - 1);
-        sheet.getRange(rowNum, 7).setValue(cur);
-        if (String(albumRows[idx].values[7] || '') === String(body.fileId)) {
-          const files = DriveApp.getFolderById(parentFolderId).getFiles();
-          let thumbnailId = '';
-          while (files.hasNext()) {
-            const file = files.next();
-            if (file.getMimeType().startsWith('image/')) {
-              thumbnailId = file.getId();
-              break;
-            }
+  let file;
+  try { file = DriveApp.getFileById(body.fileId); } catch (e) { throw new Error('Foto tidak ditemukan.'); }
+  const parents = file.getParents();
+  if (!parents.hasNext()) throw new Error('Foto tidak berada dalam album galeri.');
+  const parentFolderId = parents.next().getId();
+  assertGalleryFolder_(parentFolderId);
+  file.setTrashed(true);
+  const albumRows = getGalleryRows_();
+  const idx = albumRows.findIndex(r => String(r.values[3]) === parentFolderId);
+  if (idx >= 0) {
+    try {
+      const sheet = getGallerySheet_();
+      const rowNum = albumRows[idx].row;
+      const cur = Math.max(0, parseInt(albumRows[idx].values[6] || '0', 10) - 1);
+      sheet.getRange(rowNum, 7).setValue(cur);
+      if (String(albumRows[idx].values[7] || '') === String(body.fileId)) {
+        const files = DriveApp.getFolderById(parentFolderId).getFiles();
+        let thumbnailId = '';
+        while (files.hasNext()) {
+          const thumb = files.next();
+          if (thumb.getMimeType().startsWith('image/')) {
+            thumbnailId = thumb.getId();
+            break;
           }
-          sheet.getRange(rowNum, 8).setValue(thumbnailId);
         }
-      } catch (e) {
-        console.warn('Metadata album gagal diperbarui: ' + e.message);
+        sheet.getRange(rowNum, 8).setValue(thumbnailId);
       }
+    } catch (e) {
+      console.warn('Metadata album gagal diperbarui: ' + e.message);
     }
   }
   invalidateData_('galeri');
   return json_({ ok: true, message: 'Foto berhasil dihapus.' });
 }
 
-function getGallerySheet_() { return openSheet_(GALLERY_SPREADSHEET_ID, GALLERY_SHEET_NAME); }
+function getGallerySheet_(create) { return openSheet_(GALLERY_SPREADSHEET_ID, GALLERY_SHEET_NAME, create); }
 
 function getGalleryRows_() {
   const sheet = getGallerySheet_(), last = sheet.getLastRow();
@@ -1210,6 +1311,19 @@ function getGalleryRows_() {
 function findGalleryRow_(id) {
   const rows = getGalleryRows_(), index = rows.findIndex(r => String(r.values[0]) === String(id));
   return index < 0 ? null : rows[index];
+}
+
+function assertGalleryFolder_(folderId) {
+  const id = String(folderId || '');
+  if (!id) throw new Error('Album tidak valid.');
+  const registered = getGalleryRows_().some(r => String(r.values[3] || '') === id);
+  if (!registered) throw new Error('Album tidak ditemukan.');
+  const folder = DriveApp.getFolderById(id);
+  const parents = folder.getParents();
+  if (!parents.hasNext() || parents.next().getId() !== GALLERY_DRIVE_FOLDER_ID) {
+    throw new Error('Folder di luar galeri.');
+  }
+  return folder;
 }
 
 function galleryRowToObject_(row) {
@@ -1227,7 +1341,7 @@ function galleryRowToObject_(row) {
   };
 }
 
-function getKasSheet_() { return openSheet_(KAS_SPREADSHEET_ID, KAS_SHEET_NAME); }
+function getKasSheet_(create) { return openSheet_(KAS_SPREADSHEET_ID, KAS_SHEET_NAME, create); }
 
 function getKasRows_() {
   const sheet = getKasSheet_(), last = sheet.getLastRow();
@@ -1578,62 +1692,90 @@ function dashboardData_(body) {
   const statistik = cachedData_('list_statistik', DATA_CACHE_TTL, function () { return getStatistikRows_().map(statistikRowToObject_); });
   const announcements = cachedData_('list_announcements', DATA_CACHE_TTL, function () { return getTableRows_(getInfoSheet_(), 6, false).map(announcementRowToObject_); });
   const news = cachedData_('list_news', DATA_CACHE_TTL, function () { return getTableRows_(getNewsSheet_(), 7).map(newsRowToObject_); });
-  const kasDashboard = cachedData_(versionedKey_('kas', 'dash_' + user.userId), DATA_CACHE_TTL, function () { return kasDashboardData_(user); });
+  let kasDashboard = null;
+  if (hasMenuAccess_(user, 'kas')) {
+    kasDashboard = cachedData_(versionedKey_('kas', 'dash_' + user.userId), DATA_CACHE_TTL, function () { return kasDashboardData_(user); });
+  }
   return json_({ ok: true, statistik: statistik, announcements: announcements, news: news, kasDashboard: kasDashboard });
+}
+
+function kasCashFlowData_(bulanAwal, tahunAwal, bulanAkhir, tahunAkhir) {
+  const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
+  const namaBulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  const months = [];
+  let y = tahunAwal, m = bulanAwal;
+  while (y < tahunAkhir || (y === tahunAkhir && m <= bulanAkhir)) {
+    months.push({ bulan: m, tahun: y, label: namaBulan[m] + ' ' + y, masuk: 0, keluar: 0 });
+    m++;
+    if (m > 11) { m = 0; y++; }
+    if (months.length > 120) break;
+  }
+  let saldoAll = 0;
+  rows.forEach(row => {
+    const status = String(row[11] || 'Menunggu');
+    if (status !== 'Disetujui') return;
+    const tglRaw = row[2];
+    if (!tglRaw) return;
+    let d = null;
+    if (tglRaw instanceof Date) { d = tglRaw; }
+    else if (typeof tglRaw === 'string') {
+      const parts = tglRaw.split('/');
+      if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
+    }
+    if (!d) return;
+    const dm = d.getMonth(), dy = d.getFullYear();
+    const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
+    if (dy < tahunAwal || (dy === tahunAwal && dm < bulanAwal)) {
+      saldoAll += masuk - keluar;
+    }
+    const found = months.find(x => x.bulan === dm && x.tahun === dy);
+    if (found) { found.masuk += masuk; found.keluar += keluar; }
+  });
+  let saldo = saldoAll;
+  return months.map(x => {
+    saldo += x.masuk - x.keluar;
+    return { label: x.label, masuk: x.masuk, keluar: x.keluar, saldo: saldo };
+  });
 }
 
 function getKasCashFlow_(body) {
   requireMenuAccess_(body.token, 'kas');
   try {
-    const sheet = getKasSheet_(), lastRow = sheet.getLastRow();
-    if (lastRow < 2) return json_({ ok: true, data: [] });
-    const bulanAwal = parseInt(body.bulanAwal, 10), tahunAwal = parseInt(body.tahunAwal, 10);
-    const bulanAkhir = parseInt(body.bulanAkhir, 10), tahunAkhir = parseInt(body.tahunAkhir, 10);
+    const nowYear = new Date().getFullYear();
+    const bulanAwal = clampMonth_(body.bulanAwal, 0);
+    const tahunAwal = clampYear_(body.tahunAwal, nowYear, -10, 1);
+    const bulanAkhir = clampMonth_(body.bulanAkhir, 11);
+    const tahunAkhir = clampYear_(body.tahunAkhir, nowYear, -10, 1);
     const key = versionedKey_('kas', 'cf_' + tahunAwal + '_' + bulanAwal + '_' + tahunAkhir + '_' + bulanAkhir);
-    const data = cachedData_(key, DATA_CACHE_TTL, function () {
-      const rows = sheet.getRange(2, 1, lastRow - 1, 13).getValues();
-      const namaBulan = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-      const months = [];
-      let y = tahunAwal, m = bulanAwal;
-      while (y < tahunAkhir || (y === tahunAkhir && m <= bulanAkhir)) {
-        months.push({ bulan: m, tahun: y, label: namaBulan[m] + ' ' + y, masuk: 0, keluar: 0 });
-        m++;
-        if (m > 11) { m = 0; y++; }
-      }
-      let saldoAll = 0;
-      rows.forEach(row => {
-        const status = String(row[11] || 'Menunggu');
-        if (status !== 'Disetujui') return;
-        const tglRaw = row[2];
-        if (!tglRaw) return;
-        let d = null;
-        if (tglRaw instanceof Date) { d = tglRaw; }
-        else if (typeof tglRaw === 'string') {
-          const parts = tglRaw.split('/');
-          if (parts.length === 3) d = new Date(parts[2], parts[1] - 1, parts[0]);
-        }
-        if (!d) return;
-        const dm = d.getMonth(), dy = d.getFullYear();
-        const masuk = Number(row[6]) || 0, keluar = Number(row[7]) || 0;
-        if (dy < tahunAwal || (dy === tahunAwal && dm < bulanAwal)) {
-          saldoAll += masuk - keluar;
-        }
-        const found = months.find(x => x.bulan === dm && x.tahun === dy);
-        if (found) { found.masuk += masuk; found.keluar += keluar; }
-      });
-      let saldo = saldoAll;
-      return months.map(x => {
-        saldo += x.masuk - x.keluar;
-        return { label: x.label, masuk: x.masuk, keluar: x.keluar, saldo: saldo };
-      });
-    });
+    const data = cachedData_(key, DATA_CACHE_TTL, function () { return kasCashFlowData_(bulanAwal, tahunAwal, bulanAkhir, tahunAkhir); });
     return json_({ ok: true, data: data });
   } catch (err) {
     return json_({ ok: false, message: err.toString() });
   }
 }
 
-function getStatistikSheet_() { return openSheet_(INFO_SPREADSHEET_ID, STATISTIK_SHEET_NAME); }
+function publicKasCashFlow_(params) {
+  try {
+    const now = new Date();
+    const nowYear = now.getFullYear();
+    const bulanAwal = clampMonth_(params && params.bulanAwal, now.getMonth());
+    const tahunAwal = clampYear_(params && params.tahunAwal, nowYear, -2, 1);
+    const bulanAkhir = clampMonth_(params && params.bulanAkhir, now.getMonth());
+    const tahunAkhir = clampYear_(params && params.tahunAkhir, nowYear, -2, 1);
+    if (tahunAwal > tahunAkhir || (tahunAwal === tahunAkhir && bulanAwal > bulanAkhir)) {
+      return json_({ ok: true, data: [] });
+    }
+    const key = versionedKey_('kas', 'cf_' + tahunAwal + '_' + bulanAwal + '_' + tahunAkhir + '_' + bulanAkhir);
+    const data = cachedData_(key, PUBLIC_CACHE_TTL, function () { return kasCashFlowData_(bulanAwal, tahunAwal, bulanAkhir, tahunAkhir); }, []);
+    return json_({ ok: true, data: data || [] });
+  } catch (err) {
+    return json_({ ok: false, message: err.toString() });
+  }
+}
+
+function getStatistikSheet_(create) { return openSheet_(INFO_SPREADSHEET_ID, STATISTIK_SHEET_NAME, create); }
 
 function getStatistikRows_() {
   const sheet = getStatistikSheet_(), last = sheet.getLastRow();
@@ -1697,7 +1839,7 @@ function deleteStatistik_(body) {
   return json_({ ok: true, message: 'Kategori berhasil dihapus.' });
 }
 
-function getActivityLogSheet_() { return openSheet_(INFO_SPREADSHEET_ID, ACTIVITY_LOG_SHEET_NAME); }
+function getActivityLogSheet_(create) { return openSheet_(INFO_SPREADSHEET_ID, ACTIVITY_LOG_SHEET_NAME, create); }
 
 function logActivity_(actor, action, module, description) {
   try {
@@ -1733,6 +1875,31 @@ function listActivity_(body) {
   return json_({ ok: true, data });
 }
 
+function indexSession_(userId, token) {
+  if (!userId || !token) return;
+  const cache = CacheService.getScriptCache(), key = 'sessions_' + userId;
+  const list = JSON.parse(cache.get(key) || '[]').filter(t => t !== token);
+  list.push(token);
+  cache.put(key, JSON.stringify(list), SESSION_SECONDS);
+}
+
+function unindexSession_(userId, token) {
+  if (!userId || !token) return;
+  const cache = CacheService.getScriptCache(), key = 'sessions_' + userId;
+  const list = JSON.parse(cache.get(key) || '[]').filter(t => t !== token);
+  if (list.length) cache.put(key, JSON.stringify(list), SESSION_SECONDS);
+  else cache.remove(key);
+}
+
+function invalidateUserSessions_(userId, keepToken) {
+  if (!userId) return;
+  const cache = CacheService.getScriptCache(), key = 'sessions_' + userId;
+  const kept = JSON.parse(cache.get(key) || '[]').filter(t => t !== keepToken);
+  kept.forEach(token => cache.remove('session_' + token));
+  if (keepToken) cache.put(key, JSON.stringify([keepToken]), SESSION_SECONDS);
+  else cache.remove(key);
+}
+
 function requireSession_(token) {
   const raw = CacheService.getScriptCache().get('session_' + String(token || ''));
   if (!raw) throw new Error('Sesi berakhir. Silakan login kembali.');
@@ -1751,28 +1918,48 @@ function requireSuperAdmin_(token) {
   return user;
 }
 
+function hasMenuAccess_(user, menuKey) {
+  if (!user) return false;
+  if (['Super Admin', 'Admin'].includes(user.role)) return true;
+  if (user.role !== 'Editor') return false;
+  let menus = [];
+  try { menus = JSON.parse(user.menuAkses || '[]'); } catch (e) { menus = []; }
+  return Array.isArray(menus) && menus.includes(menuKey);
+}
+
 function requireMenuAccess_(token, menuKey) {
   const user = requireSession_(token);
-  if (['Super Admin', 'Admin'].includes(user.role)) return user;
-  if (user.role === 'Editor') {
-    const menus = JSON.parse(user.menuAkses || '[]');
-    if (menus.includes(menuKey)) return user;
-  }
+  if (hasMenuAccess_(user, menuKey)) return user;
   throw new Error('Anda tidak memiliki akses ke menu ini.');
 }
 
-function getSheet_() { return openSheet_(USER_SPREADSHEET_ID, USER_SHEET_NAME); }
-function getHimbauanSheet_() { return openSheet_(HIMBAUAN_SPREADSHEET_ID, HIMBAUAN_SHEET_NAME); }
-function getInfoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, INFO_SHEET_NAME); }
-function getNewsSheet_() { return openSheet_(INFO_SPREADSHEET_ID, NEWS_SHEET_NAME); }
-function getVideoSheet_() { return openSheet_(INFO_SPREADSHEET_ID, VIDEO_SHEET_NAME); }
-function getVideoKegiatanSheet_() { return openSheet_(GALLERY_SPREADSHEET_ID, VIDEO_KEGIATAN_SHEET_NAME); }
-function getFacilitySheet_() { return openSheet_(FASUM_SPREADSHEET_ID, FASUM_SHEET_NAME); }
-function getOrgSheet_(name) { return openSheet_(ORG_SPREADSHEET_ID, name); }
-function openSheet_(spreadsheetId, sheetName) { const ss=SpreadsheetApp.openById(spreadsheetId); let sheet=ss.getSheetByName(sheetName); if(!sheet) sheet=ss.insertSheet(sheetName); return sheet; }
+function getSheet_(create) { return openSheet_(USER_SPREADSHEET_ID, USER_SHEET_NAME, create); }
+function getHimbauanSheet_(create) { return openSheet_(HIMBAUAN_SPREADSHEET_ID, HIMBAUAN_SHEET_NAME, create); }
+function getInfoSheet_(create) { return openSheet_(INFO_SPREADSHEET_ID, INFO_SHEET_NAME, create); }
+function getNewsSheet_(create) { return openSheet_(INFO_SPREADSHEET_ID, NEWS_SHEET_NAME, create); }
+function getVideoSheet_(create) { return openSheet_(INFO_SPREADSHEET_ID, VIDEO_SHEET_NAME, create); }
+function getVideoKegiatanSheet_(create) { return openSheet_(GALLERY_SPREADSHEET_ID, VIDEO_KEGIATAN_SHEET_NAME, create); }
+function getFacilitySheet_(create) { return openSheet_(FASUM_SPREADSHEET_ID, FASUM_SHEET_NAME, create); }
+function getOrgSheet_(name, create) { return openSheet_(ORG_SPREADSHEET_ID, name, create); }
+const _sheetMemo = {};
+function openSheet_(spreadsheetId, sheetName, createIfMissing) {
+  const memoKey = spreadsheetId + '|' + sheetName;
+  if (_sheetMemo[memoKey] !== undefined) return _sheetMemo[memoKey];
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    if (createIfMissing !== true) {
+      throw new Error('Sheet "' + sheetName + '" belum ada. Jalankan setupAllSheets() satu kali di editor Apps Script.');
+    }
+    sheet = ss.insertSheet(sheetName);
+  }
+  _sheetMemo[memoKey] = sheet;
+  return sheet;
+}
 function ensureHeader_(sheet, headers) { if (sheet.getLastRow() === 0) sheet.getRange(1,1,1,headers.length).setValues([headers]); if (sheet.getFrozenRows() === 1) return; sheet.setFrozenRows(1); sheet.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#d9ead3'); }
 function getRows_(sheet) { const last = sheet.getLastRow(); if (last < 2) return []; const cols = Math.min(11, sheet.getLastColumn()); return sheet.getRange(2,1,last-1,cols).getDisplayValues().filter(r => r[0]); }
-function findUserRow_(id) { const rows=getRows_(getSheet_()), index=rows.findIndex(r=>String(r[0])===String(id)); return index<0?null:{row:index+2,values:rows[index]}; }
+function getUserRows_() { const sheet = getSheet_(), last = sheet.getLastRow(); if (last < 2) return []; const cols = Math.min(11, sheet.getLastColumn()); const values = sheet.getRange(2,1,last-1,cols).getDisplayValues(); return values.map((r,i) => ({row:i+2, values:r})).filter(x => x.values[0]); }
+function findUserRow_(id) { const found = getUserRows_().find(r => String(r.values[0]) === String(id)); return found ? {row:found.row, values:found.values} : null; }
 function rowToUser_(r) { return {userId:r[0],nama:r[1],email:r[2],noHp:r[3],role:r[4],wilayah:r[5],status:r[6],loginTerakhir:r[8] || '-',tanggalDibuat:r[9] || '-',menuAkses:r[10] || '[]'}; }
 function nextUserId_(rows) { const max=rows.reduce((m,r)=>Math.max(m,parseInt(String(r[0]).replace(/\D/g,''),10)||0),-1); return 'RW-' + String(max+1).padStart(4,'0'); }
 function getHimbauanRows_() { const sheet=getHimbauanSheet_(), last=sheet.getLastRow(); if(last<2)return []; const values=sheet.getRange(2,1,last-1,5).getDisplayValues(); const formulas=sheet.getRange(2,1,last-1,5).getFormulas(); return values.map((v,i)=>({row:i+2,values:v,formulas:formulas[i]})).filter(r=>r.values[0]); }
@@ -1844,6 +2031,11 @@ function sanitizeHtml_(html) {
   text = text.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
   text = text.replace(/(?:href|src|action)\s*=\s*(?:"|')?\s*(?:javascript|vbscript|data):[^"'\s>]*/gi, '');
   return text;
+}
+function escapeHtml_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function today_() { return Utilities.formatDate(new Date(),Session.getScriptTimeZone() || 'Asia/Jakarta','dd/MM/yyyy'); }
 function formatDate_(date) { return Utilities.formatDate(date,Session.getScriptTimeZone() || 'Asia/Jakarta','dd/MM/yyyy HH:mm'); }
