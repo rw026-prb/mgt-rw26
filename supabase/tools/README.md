@@ -9,9 +9,22 @@ serta alat untuk mengujinya.
 | `lib.mjs` | Klien Google Sheets + Supabase, dan fungsi parsing. |
 | `.env.example` | Daftar variabel yang perlu diisi. Salin jadi `.env`. |
 | `test-lib.mjs` | 36 pengujian fungsi tanggal dan parsing. Jalankan sebelum migrasi. |
+| `test-migrate.mjs` | 27 pengujian kasus sulit dari data Sheets. |
 | `validate-migrations.cjs` | Menjalankan seluruh file SQL di PostgreSQL lokal. |
+| `smoke.mjs` | Menguji jalur publik di Supabase produksi memakai kunci `anon`. |
+| `cek-aksi.mjs` | Mencocokkan aksi yang dipanggil portal dengan yang ditangani jembatan dan `Code.gs`. |
+| `split-codegs.mjs` | Memotong `Code.gs` menjadi bagian galeri/media saja. |
 
-Tidak ada dependency npm untuk migrasi. Yang dibutuhkan hanya **Node.js 18+**.
+Migrasi (`migrate.mjs`) tidak butuh dependency npm. Yang dibutuhkan hanya
+**Node.js 18+**.
+
+Alat pengujian SQL (`validate-migrations.cjs`) memakai `embedded-postgres` yang
+mengunduh PostgreSQL asli, jadi hasilnya jauh lebih dapat diandalkan daripada
+sekadar pemeriksaan ejaan. Instalasi sekali di awal:
+
+```powershell
+npm install
+```
 
 ---
 

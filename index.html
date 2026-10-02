@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="id" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
@@ -13,9 +13,14 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
   <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/rw26-api.js"></script>
   <script>
-    window.RW26_SESSION = JSON.parse(localStorage.getItem('rw26_session') || sessionStorage.getItem('rw26_session') || 'null');
-    if (!window.RW26_SESSION || !window.RW26_SESSION.token || window.RW26_SESSION.expiresAt < Date.now()) location.replace('login.html');
+    // Sesi tidak lagi diambil dari localStorage. Supabase Auth yang menyimpan
+    // dan memperbarui sesi;RW26.bootstrap() memuatnya lalu mengarahkan ke
+    // login.html kalau tidak valid.
+    // Periksa lebih dulu agar TIDAK ada kedipan konten milik pengguna lain.
+    window.RW26_SESSION = null;
   </script>
   <style>
     :root {
@@ -298,7 +303,7 @@
       <div class="card-body p-4">
         <form id="kasForm">
           <input type="hidden" id="kasJenis" value="">
-          <input type="hidden" id="kasRowNum" value="">
+          <input type="hidden" id="kasId" value="">
           <input type="hidden" id="kasStatus" value="">
           <div class="row g-3">
             <div class="col-md-6">
@@ -574,6 +579,17 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script>
+  (async () => {
+    // Tunggu sesi Supabase terkonfirmasi lebih dulu. Hampir seluruh isi portal
+    // bergantung pada session.user (nama, role, menu akses), jadi membaca
+    // data sebelum sesi siap akan menampilkan layar kosong atau - lebih buruk -
+    // menampilkan menu yang tidak seharusnya terlihat.
+    // RW26.bootstrap() yang mengarahkan ke login.html kalau sesi tidak valid,
+    // sehingga setelah baris ini aman untuk diteruskan.
+    await window.RW26.ready;
+    if (!window.RW26_SESSION) return;
+    const session = window.RW26_SESSION;
+
     let announcements = [];
     let news = [];
     let facilities = [];
@@ -585,7 +601,6 @@
     let currentAlbum = null;
     let loadedMenus = {};
     let dashboardReady = false;
-    const session=window.RW26_SESSION;
     const apiConfig=window.RW26_CONFIG||{};
 
     const ALL_MENUS = [
@@ -712,12 +727,54 @@
     }
     const _apiCacheTtl = 120000;
     const _apiPending = {};
-    const _mutationActions = new Set(['createUser','updateUser','toggleUser','deleteUser','createHimbauan','toggleHimbauan','deleteHimbauan','createAnnouncement','updateAnnouncement','toggleAnnouncement','deleteAnnouncement','createNews','updateNews','toggleNews','deleteNews','createFacility','updateFacility','deleteFacility','createOrgMember','updateOrgMember','deleteOrgMember','refreshKas','createKas','updateKas','deleteKas','approveKas','rejectKas','createStatistik','updateStatistik','deleteStatistik','createGalleryAlbum','deleteGalleryAlbum','uploadGalleryPhoto','deleteGalleryPhoto','createVideo','updateVideo','toggleVideo','setVideoAutoplay','clearVideoAutoplay','deleteVideo','createVideoKegiatan','updateVideoKegiatan','toggleVideoKegiatan','deleteVideoKegiatan','updateMyProfile','logout']);
+    const _mutationActions = new Set(['createUser','updateUser','toggleUser','deleteUser','createHimbauan','toggleHimbauan','deleteHimbauan','createAnnouncement','updateAnnouncement','toggleAnnouncement','deleteAnnouncement','createFacility','updateFacility','deleteFacility','createOrgMember','updateOrgMember','deleteOrgMember','refreshKas','createKas','updateKas','deleteKas','approveKas','rejectKas','createStatistik','updateStatistik','deleteStatistik','createGalleryAlbum','deleteGalleryAlbum','uploadGalleryPhoto','deleteGalleryPhoto','createVideo','updateVideo','toggleVideo','setVideoAutoplay','clearVideoAutoplay','deleteVideo','createVideoKegiatan','updateVideoKegiatan','toggleVideoKegiatan','deleteVideoKegiatan','uploadDriveImage','updateMyProfile','logout']);
     function _apiCacheKey(action,payload){return 'rw26cache_'+(session?.user?.userId||'anon')+'_'+action+'_'+JSON.stringify(payload);}
     function _apiCacheGet(key){try{const raw=sessionStorage.getItem(key);if(!raw)return undefined;const o=JSON.parse(raw);if(Date.now()-o.t>_apiCacheTtl){sessionStorage.removeItem(key);return undefined;}return o.d;}catch(e){return undefined;}}
     function _apiCacheSet(key,data){try{sessionStorage.setItem(key,JSON.stringify({t:Date.now(),d:data}));}catch(e){}}
     function _apiCacheClear(){try{Object.keys(sessionStorage).filter(k=>k.indexOf('rw26cache_')===0).forEach(k=>sessionStorage.removeItem(k));}catch(e){}}
-    async function apiRequest(action,payload={}){if(!apiConfig.APPS_SCRIPT_URL?.startsWith('https://script.google.com/'))throw new Error('URL Google Apps Script belum diatur pada config.js.');const isMutation=_mutationActions.has(action);const key=_apiCacheKey(action,payload);if(!isMutation){const hit=_apiCacheGet(key);if(hit!==undefined)return hit;if(_apiPending[key])return _apiPending[key];}const p=(async()=>{const doFetch=async()=>{const response=await fetch(apiConfig.APPS_SCRIPT_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,token:session.token,...payload})});const text=await response.text();try{return JSON.parse(text);}catch(e){return{__notJson:true};}};let data=await doFetch();if(data&&data.__notJson&&!isMutation){await new Promise(r=>setTimeout(r,1200+Math.floor(Math.random()*800)));data=await doFetch();}if(!data||data.__notJson)throw new Error('Server sedang sibuk, coba lagi beberapa saat.');if(!data.ok){if(data.message?.includes('Sesi berakhir'))logout(false);throw new Error(data.message||'Permintaan gagal.');}return data;})();_apiPending[key]=p;try{const data=await p;if(isMutation)_apiCacheClear();else _apiCacheSet(key,data);return data;}finally{delete _apiPending[key];}}
+    /**
+ * Satu-satunya jalan keluar dari portal menuju server.
+ *
+ * Dulu seluruh permintaan menembak Google Apps Script. Sekarang dibagi:
+ *
+ *   - Galeri, Berita, Video, unggah foto  -> Apps Script
+ *   - Modul lain                           -> Supabase
+ *
+ * Pembagian itu dikendalikan di dalam assets/js/rw26-api.js, bukan di sini.
+ * Fungsi ini tetap dengan nama dan tanda tangannya yang sama supaya seluruh
+ * kode pemanggil tidak perlu disentuh.
+ *
+ * Cache 2 menit untuk permintaan baca tetap dipertahankan.ادلnya hanya
+ * berlaku untuk data Supabase; data Apps Script sudah punya cache-nya sendiri
+ * di sisi server.
+ */
+async function apiRequest(action, payload = {}) {
+  const isMutation = _mutationActions.has(action);
+  const key = _apiCacheKey(action, payload);
+  if (!isMutation) {
+    const hit = _apiCacheGet(key);
+    if (hit !== undefined) return hit;
+    if (_apiPending[key]) return _apiPending[key];
+  }
+  const p = (async () => {
+    const data = await window.RW26.apiRequest(action, payload);
+    if (!data) throw new Error('Server tidak mengembalikan data.');
+    if (data.ok === false) throw new Error(data.message || 'Permintaan gagal.');
+    return data;
+  })();
+  _apiPending[key] = p;
+  try {
+    const data = await p;
+    if (isMutation) _apiCacheClear(); else _apiCacheSet(key, data);
+    return data;
+  } catch (err) {
+    // Sesi habis (token kedaluwarsa atau akun dinonaktifkan) -> langsung
+    // keluarkan dari portal supaya tidak ada permintaan sia-sia berikutnya.
+    if (/Sesi berakhir|token|Sudah keluar/i.test(err.message || '')) logout(false);
+    throw err;
+  } finally { delete _apiPending[key]; }
+}
+
     async function withLoading(errorId, targetId, loadingHtml, action){const error=document.getElementById(errorId);error?.classList.add('d-none');if(targetId)document.getElementById(targetId).innerHTML=loadingHtml;try{return await action();}catch(err){if(error){error.textContent=err.message;error.classList.remove('d-none');}throw err;}}
     async function loadUsers(){const error=document.getElementById('userError');error.classList.add('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr>';try{const data=await apiRequest('listUsers');users=data.users;renderUsers();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
     async function loadHimbauan(){const error=document.getElementById('himbauanError');error.classList.add('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center p-4"><span class="spinner-border spinner-border-sm me-2"></span>Memuat slide himbauan...</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr>';try{const data=await apiRequest('listHimbauan');himbauans=data.himbauan;renderHimbauan();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center text-danger p-4">Slide himbauan tidak dapat dimuat.</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
@@ -868,9 +925,9 @@ let kasPage = 1;
     }
 
     function dapatkanTanggalHariIni(){const d=new Date();return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}
-    function bukaFormKas(jenis){const card=document.getElementById('kasFormCard');const form=document.getElementById('kasForm');form.reset();document.getElementById('kasRowNum').value='';document.getElementById('kasJenis').value=jenis;document.getElementById('kasTanggal').value=dapatkanTanggalHariIni();document.getElementById('kasFileHint').style.display='block';document.getElementById('kasFileHint').textContent='Opsional â€” boleh dikosongkan. Tanpa bukti, pastikan nominal benar.';document.getElementById('kasFile').required=false;document.getElementById('kasFile').value='';document.getElementById('kasRejectReason').classList.add('d-none');const hdr=document.getElementById('kasFormHeader');const btn=document.getElementById('kasSubmit');if(jenis==='masuk'){hdr.className='kas-form-header masuk';hdr.innerHTML='<i class="bi bi-plus-circle me-2"></i>Input Kas Masuk';btn.className='btn btn-success w-100 fw-bold py-2';btn.textContent='SIMPAN TRANSAKSI MASUK';}else{hdr.className='kas-form-header keluar';hdr.innerHTML='<i class="bi bi-dash-circle me-2"></i>Input Kas Keluar';btn.className='btn btn-danger w-100 fw-bold py-2';btn.textContent='SIMPAN TRANSAKSI KELUAR';}card.style.display='block';card.scrollIntoView({behavior:'smooth',block:'center'});}
+    function bukaFormKas(jenis){const card=document.getElementById('kasFormCard');const form=document.getElementById('kasForm');form.reset();document.getElementById('kasId').value='';document.getElementById('kasJenis').value=jenis;document.getElementById('kasTanggal').value=dapatkanTanggalHariIni();document.getElementById('kasFileHint').style.display='block';document.getElementById('kasFileHint').textContent='Opsional â€” boleh dikosongkan. Tanpa bukti, pastikan nominal benar.';document.getElementById('kasFile').required=false;document.getElementById('kasFile').value='';document.getElementById('kasRejectReason').classList.add('d-none');const hdr=document.getElementById('kasFormHeader');const btn=document.getElementById('kasSubmit');if(jenis==='masuk'){hdr.className='kas-form-header masuk';hdr.innerHTML='<i class="bi bi-plus-circle me-2"></i>Input Kas Masuk';btn.className='btn btn-success w-100 fw-bold py-2';btn.textContent='SIMPAN TRANSAKSI MASUK';}else{hdr.className='kas-form-header keluar';hdr.innerHTML='<i class="bi bi-dash-circle me-2"></i>Input Kas Keluar';btn.className='btn btn-danger w-100 fw-bold py-2';btn.textContent='SIMPAN TRANSAKSI KELUAR';}card.style.display='block';card.scrollIntoView({behavior:'smooth',block:'center'});}
     function tutupFormKas(){document.getElementById('kasFormCard').style.display='none';document.getElementById('kasRejectReason').classList.add('d-none');document.getElementById('kasForm').reset();}
-    function isiEditKas(item){const jenis=item.masuk>0?'masuk':'keluar';bukaFormKas(jenis);document.getElementById('kasRowNum').value=item.rowNum;document.getElementById('kasStatus').value=item.status||'';document.getElementById('kasTanggal').value=item.tanggal;document.getElementById('kasUraian').value=item.uraian;document.getElementById('kasMetode').value=item.metode;document.getElementById('kasNominal').value=item.masuk>0?item.masuk:item.keluar;document.getElementById('kasKeterangan').value=item.keterangan||'';document.getElementById('kasFile').required=false;document.getElementById('kasFileHint').style.display='block';document.getElementById('kasFileHint').textContent=item.fileUrl&&item.fileUrl!=='-'&&item.fileUrl!==''?'Kosongkan jika tidak ingin mengubah bukti. Tanpa file baru, bukti lama tetap dipakai.':'Opsional â€” boleh dikosongkan. Tanpa bukti, pastikan nominal benar.';const hdr=document.getElementById('kasFormHeader');const btn=document.getElementById('kasSubmit');const rejectBanner=document.getElementById('kasRejectReason');const rejectText=document.getElementById('kasRejectReasonText');if(item.status==='Ditolak'){hdr.innerHTML='<i class="bi bi-arrow-repeat me-2"></i>Revisi Transaksi ('+item.uraian+')';btn.className='btn btn-warning w-100 fw-bold py-2';btn.textContent='KIRIM ULANG';if(item.alasanDitolak){rejectText.textContent=item.alasanDitolak;rejectBanner.classList.remove('d-none');}}else{hdr.innerHTML='<i class="bi bi-pencil-square me-2"></i>Edit Transaksi ('+item.uraian+')';btn.className='btn btn-primary w-100 fw-bold py-2';btn.textContent='UPDATE TRANSAKSI';}}
+    function isiEditKas(item){const jenis=item.masuk>0?'masuk':'keluar';bukaFormKas(jenis);document.getElementById('kasId').value=item.id;document.getElementById('kasStatus').value=item.status||'';document.getElementById('kasTanggal').value=item.tanggal;document.getElementById('kasUraian').value=item.uraian;document.getElementById('kasMetode').value=item.metode;document.getElementById('kasNominal').value=item.masuk>0?item.masuk:item.keluar;document.getElementById('kasKeterangan').value=item.keterangan||'';document.getElementById('kasFile').required=false;document.getElementById('kasFileHint').style.display='block';document.getElementById('kasFileHint').textContent=item.fileUrl&&item.fileUrl!=='-'&&item.fileUrl!==''?'Kosongkan jika tidak ingin mengubah bukti. Tanpa file baru, bukti lama tetap dipakai.':'Opsional â€” boleh dikosongkan. Tanpa bukti, pastikan nominal benar.';const hdr=document.getElementById('kasFormHeader');const btn=document.getElementById('kasSubmit');const rejectBanner=document.getElementById('kasRejectReason');const rejectText=document.getElementById('kasRejectReasonText');if(item.status==='Ditolak'){hdr.innerHTML='<i class="bi bi-arrow-repeat me-2"></i>Revisi Transaksi ('+item.uraian+')';btn.className='btn btn-warning w-100 fw-bold py-2';btn.textContent='KIRIM ULANG';if(item.alasanDitolak){rejectText.textContent=item.alasanDitolak;rejectBanner.classList.remove('d-none');}}else{hdr.innerHTML='<i class="bi bi-pencil-square me-2"></i>Edit Transaksi ('+item.uraian+')';btn.className='btn btn-primary w-100 fw-bold py-2';btn.textContent='UPDATE TRANSAKSI';}}
     async function muatKas(){const err=document.getElementById('kasError');err.classList.add('d-none');document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat transaksi...</td></tr>';try{const data=await apiRequest('listKas',{page:kasPage,perPage:kasPerPage,q:kasSearchQ,status:kasFilterStatus});kasData=data.data;kasTotal=data.total;kasTotalPages=data.totalPages;kasPage=data.page;        kasUserRole=data.userRole;kasUserId=data.userId;kasUserNama=data.userNama;if(kasPage>kasTotalPages&&kasTotalPages>=1)kasPage=kasTotalPages;renderKasTable();}catch(e){err.textContent=e.message;err.classList.remove('d-none');document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
     function renderKasTable(){
       const tb=document.getElementById('kasTable');
@@ -888,16 +945,16 @@ let kasPage = 1;
         const badge=item.status==='Disetujui'&&item.approvedBy?'<span class="badge badge-soft-success" title="Disetujui oleh '+esc(item.approvedBy)+'">Disetujui</span>':statusBadge[item.status]||'<span class="badge badge-soft-warning">Menunggu</span>';
         let actions='';
         if(isApprover&&item.status==='Menunggu'){
-          actions='<button class="btn btn-success btn-sm" onclick="approveKas('+item.rowNum+')" title="Setujui"><i class="bi bi-check-lg"></i></button>'
-            +'<button class="btn btn-warning btn-sm" onclick="rejectKas('+item.rowNum+')" title="Tolak"><i class="bi bi-x-lg"></i></button>'
+          actions='<button class="btn btn-success btn-sm" onclick="approveKas('+item.id+')" title="Setujui"><i class="bi bi-check-lg"></i></button>'
+            +'<button class="btn btn-warning btn-sm" onclick="rejectKas('+item.id+')" title="Tolak"><i class="bi bi-x-lg"></i></button>'
             +'<button class="btn btn-info btn-sm" onclick="isiEditKas(kasData['+i+'])" title="Edit"><i class="bi bi-pencil"></i></button>'
-            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.rowNum+')" title="Hapus"><i class="bi bi-trash"></i></button>';
+            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.id+')" title="Hapus"><i class="bi bi-trash"></i></button>';
         }else if(isApprover){
           actions='<button class="btn btn-info btn-sm" onclick="isiEditKas(kasData['+i+'])" title="Edit"><i class="bi bi-pencil"></i></button>'
-            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.rowNum+')" title="Hapus"><i class="bi bi-trash"></i></button>';
+            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.id+')" title="Hapus"><i class="bi bi-trash"></i></button>';
         }else if(item.createdBy===kasUserNama&&(item.status==='Menunggu'||item.status==='Ditolak')){
           actions='<button class="btn btn-info btn-sm" onclick="isiEditKas(kasData['+i+'])" title="Edit"><i class="bi bi-pencil"></i></button>'
-            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.rowNum+')" title="Hapus"><i class="bi bi-trash"></i></button>';
+            +'<button class="btn btn-danger btn-sm" onclick="hapusKas('+item.id+')" title="Hapus"><i class="bi bi-trash"></i></button>';
         }
         return '<tr><td class="text-nowrap">'+esc(item.tanggal)+'</td><td><div class="fw-semibold small">'+esc(item.uraian)+'</div></td><td>'+esc(item.metode)+'</td><td class="text-end text-danger fw-bold">'+(item.keluar>0?'Rp '+item.keluar.toLocaleString('id-ID'):'-')+'</td><td class="text-end text-success fw-bold">'+(item.masuk>0?'Rp '+item.masuk.toLocaleString('id-ID'):'-')+'</td><td class="text-center">'+bukti+'</td><td class="text-center">'+badge+'</td><td class="text-center"><div class="btn-group btn-group-sm">'+actions+'</div></td></tr>';
       }).join('');
@@ -921,12 +978,12 @@ let kasPage = 1;
     }
     function kasGoPage(p){if(p<1||p>kasTotalPages||p===kasPage)return;kasPage=p;muatKas();}
     async function refreshKas(){const btn=document.getElementById('refreshKas');btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Memuat';try{await apiRequest('refreshKas');await muatKas();await muatDashboardKas(true);const activeTab=document.querySelector('#kasTab .nav-link.active')?.id;if(activeTab==='kas-laporan-tab'){kasLaporanCache=null;await muatLaporanKas();}if(activeTab==='kas-arus-tab')await muatArusKas();toast('Data Kas telah diperbarui.');}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-arrow-clockwise me-2"></i>Segarkan';}}
-    async function hapusKas(rowNum){const modal=new bootstrap.Modal(document.getElementById('kasDeleteModal'));document.getElementById('kasDeleteConfirmBtn').onclick=async function(){modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Menghapus...</td></tr>';await apiRequest('deleteKas',{rowNum});toast('Transaksi berhasil dihapus.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
+    async function hapusKas(id){const modal=new bootstrap.Modal(document.getElementById('kasDeleteModal'));document.getElementById('kasDeleteConfirmBtn').onclick=async function(){modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Menghapus...</td></tr>';await apiRequest('deleteKas',{id});toast('Transaksi berhasil dihapus.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
     function showHimbauanImage(fileId,imageUrl){document.getElementById('himbauanImageFull').src=fileId?'https://drive.google.com/thumbnail?id='+fileId+'&sz=w2000':(imageUrl||'');new bootstrap.Modal(document.getElementById('himbauanImageModal')).show();}
     function showBuktiKas(imageUrl,fileUrl){var img=document.getElementById('kasBuktiImage');var frame=document.getElementById('kasBuktiFrame');var link=document.getElementById('kasBuktiLink');link.href=fileUrl;var isImage=imageUrl&&imageUrl.indexOf('drive.google.com')>-1;if(isImage){img.src=imageUrl;img.classList.remove('d-none');frame.classList.add('d-none');}else{frame.src=fileUrl;frame.classList.remove('d-none');img.classList.add('d-none');}new bootstrap.Modal(document.getElementById('kasBuktiModal')).show();}
-    async function approveKas(rowNum){const modal=new bootstrap.Modal(document.getElementById('kasApproveModal'));document.getElementById('kasApproveConfirmBtn').onclick=async function(){modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memproses...</td></tr>';await apiRequest('approveKas',{rowNum});toast('Transaksi berhasil disetujui.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
-    async function rejectKas(rowNum){const ta=document.getElementById('kasRejectAlasan');ta.value='';const modal=new bootstrap.Modal(document.getElementById('kasRejectModal'));document.getElementById('kasRejectConfirmBtn').onclick=async function(){const alasan=ta.value.trim();if(!alasan){ta.focus();return;}modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memproses...</td></tr>';await apiRequest('rejectKas',{rowNum,alasan});toast('Transaksi berhasil ditolak.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
-    async function simpanKas(form){const btn=document.getElementById('kasSubmit');btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{const rowNum=document.getElementById('kasRowNum').value;const jenis=document.getElementById('kasJenis').value;const tanggal=document.getElementById('kasTanggal').value.trim();const uraian=document.getElementById('kasUraian').value.trim();const nominal=document.getElementById('kasNominal').value;if(!tanggal||!uraian||!nominal){toast('Tanggal, uraian, dan nominal wajib diisi.',true);btn.disabled=false;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';return;}const file=document.getElementById('kasFile').files[0];let dataUrl='',fileName='';if(file){dataUrl=await fileToDataUrl(file);fileName=file.name;}else{const existing=rowNum?kasData.find(x=>String(x.rowNum)===String(rowNum)):null;const hasExistingBukti=existing&&existing.fileUrl&&existing.fileUrl!=='-'&&existing.fileUrl!=='';if(!hasExistingBukti){btn.disabled=false;btn.textContent=rowNum?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';const me=document.getElementById('kasTanpaBuktiModal');const cb=document.getElementById('kasTanpaBuktiConfirmBtn');cb.onclick=async()=>{bootstrap.Modal.getInstance(me)?.hide();const b=document.getElementById('kasSubmit');b.disabled=true;b.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{const currentStatus2=document.getElementById('kasStatus').value;const payload2={kas:{rowNum,jenis_form:jenis,tanggal,uraian,metode:document.getElementById('kasMetode').value,nominal,keterangan:document.getElementById('kasKeterangan').value.trim()||'-',fileData:'',fileName:'',status:(rowNum&&currentStatus2==='Ditolak')?'Menunggu':undefined}};if(rowNum){await apiRequest('updateKas',payload2);}else{await apiRequest('createKas',payload2);}tutupFormKas();toast((rowNum&&currentStatus2==='Ditolak')?'Transaksi berhasil dikirim ulang.':'Transaksi berhasil disimpan.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}finally{b.disabled=false;b.textContent=document.getElementById('kasRowNum').value?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';}};bootstrap.Modal.getOrCreateInstance(me).show();return;}}const currentStatus=document.getElementById('kasStatus').value;const payload={kas:{rowNum,jenis_form:jenis,tanggal,uraian,metode:document.getElementById('kasMetode').value,nominal,keterangan:document.getElementById('kasKeterangan').value.trim()||'-',fileData:dataUrl,fileName,status:(rowNum&&currentStatus==='Ditolak')?'Menunggu':undefined}};if(rowNum){await apiRequest('updateKas',payload);}else{await apiRequest('createKas',payload);}tutupFormKas();toast((rowNum&&currentStatus==='Ditolak')?'Transaksi berhasil dikirim ulang.':'Transaksi berhasil disimpan.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent=document.getElementById('kasRowNum').value?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';}}
+    async function approveKas(id){const modal=new bootstrap.Modal(document.getElementById('kasApproveModal'));document.getElementById('kasApproveConfirmBtn').onclick=async function(){modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memproses...</td></tr>';await apiRequest('approveKas',{id});toast('Transaksi berhasil disetujui.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
+    async function rejectKas(id){const ta=document.getElementById('kasRejectAlasan');ta.value='';const modal=new bootstrap.Modal(document.getElementById('kasRejectModal'));document.getElementById('kasRejectConfirmBtn').onclick=async function(){const alasan=ta.value.trim();if(!alasan){ta.focus();return;}modal.hide();try{document.getElementById('kasTable').innerHTML='<tr><td colspan="8" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memproses...</td></tr>';await apiRequest('rejectKas',{id,alasan});toast('Transaksi berhasil ditolak.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}};modal.show();}
+    async function simpanKas(form){const btn=document.getElementById('kasSubmit');btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{const id=document.getElementById('kasId').value;const jenis=document.getElementById('kasJenis').value;const tanggal=document.getElementById('kasTanggal').value.trim();const uraian=document.getElementById('kasUraian').value.trim();const nominal=document.getElementById('kasNominal').value;if(!tanggal||!uraian||!nominal){toast('Tanggal, uraian, dan nominal wajib diisi.',true);btn.disabled=false;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';return;}const file=document.getElementById('kasFile').files[0];let dataUrl='',fileName='';if(file){dataUrl=await fileToDataUrl(file);fileName=file.name;}else{const existing=id?kasData.find(x=>String(x.id)===String(id)):null;const hasExistingBukti=existing&&existing.fileUrl&&existing.fileUrl!=='-'&&existing.fileUrl!=='';if(!hasExistingBukti){btn.disabled=false;btn.textContent=id?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';const me=document.getElementById('kasTanpaBuktiModal');const cb=document.getElementById('kasTanpaBuktiConfirmBtn');cb.onclick=async()=>{bootstrap.Modal.getInstance(me)?.hide();const b=document.getElementById('kasSubmit');b.disabled=true;b.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{const currentStatus2=document.getElementById('kasStatus').value;const payload2={kas:{id,jenis_form:jenis,tanggal,uraian,metode:document.getElementById('kasMetode').value,nominal,keterangan:document.getElementById('kasKeterangan').value.trim()||'-',fileData:'',fileName:'',status:(id&&currentStatus2==='Ditolak')?'Menunggu':undefined}};if(id){await apiRequest('updateKas',payload2);}else{await apiRequest('createKas',payload2);}tutupFormKas();toast((id&&currentStatus2==='Ditolak')?'Transaksi berhasil dikirim ulang.':'Transaksi berhasil disimpan.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}finally{b.disabled=false;b.textContent=document.getElementById('kasId').value?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';}};bootstrap.Modal.getOrCreateInstance(me).show();return;}}const currentStatus=document.getElementById('kasStatus').value;const payload={kas:{id,jenis_form:jenis,tanggal,uraian,metode:document.getElementById('kasMetode').value,nominal,keterangan:document.getElementById('kasKeterangan').value.trim()||'-',fileData:dataUrl,fileName,status:(id&&currentStatus==='Ditolak')?'Menunggu':undefined}};if(id){await apiRequest('updateKas',payload);}else{await apiRequest('createKas',payload);}tutupFormKas();toast((id&&currentStatus==='Ditolak')?'Transaksi berhasil dikirim ulang.':'Transaksi berhasil disimpan.');await muatKas();await muatDashboardKas(true);}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.textContent=document.getElementById('kasId').value?'UPDATE TRANSAKSI':'SIMPAN TRANSAKSI';}}
     function inisialisasiLaporanKas(){const namaBulan=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];const d=new Date();const ddlBulan=document.getElementById("kasFilterBulan");const ddlTahun=document.getElementById("kasFilterTahun");if(ddlBulan.options.length===0){for(let i=0;i<12;i++){const opt=document.createElement("option");opt.value=i;opt.text=namaBulan[i];if(i===d.getMonth())opt.selected=true;ddlBulan.appendChild(opt);}for(let i=d.getFullYear()-2;i<=d.getFullYear()+2;i++){const opt=document.createElement("option");opt.value=i;opt.text=i;if(i===d.getFullYear())opt.selected=true;ddlTahun.appendChild(opt);}}kasLaporanCache=null;document.getElementById('kasBoxLaporan').style.display='none';}
     async function muatLaporanKas(){const btn=document.getElementById('kasBtnCari');btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Memuat';try{const bln=document.getElementById("kasFilterBulan").value;const thn=document.getElementById("kasFilterTahun").value;const res=await apiRequest('getKasReport',{bulan:bln,tahun:thn});if(!res.ok){btn.disabled=false;btn.innerHTML='<i class="bi bi-search me-1"></i>Cari';return;}kasLaporanCache=res;kasLaporanCache.namaBulanTeks=document.getElementById("kasFilterBulan").options[document.getElementById("kasFilterBulan").selectedIndex].text;kasLaporanCache.tahunTeks=thn;document.getElementById("kasBoxLaporan").style.display="block";document.getElementById("kasSaldoAwal").textContent="Rp "+res.saldoAwal.toLocaleString('id-ID');document.getElementById("kasTotalMasuk").textContent="Rp "+res.totalMasuk.toLocaleString('id-ID');document.getElementById("kasTotalKeluar").textContent="Rp "+res.totalKeluar.toLocaleString('id-ID');document.getElementById("kasSaldoAkhir").textContent="Rp "+res.saldoAkhir.toLocaleString('id-ID');let hm='';if(res.rincianMasuk.length===0){hm='<tr><td colspan="3" class="text-center text-muted">Tidak ada pemasukan</td></tr>';}else{res.rincianMasuk.forEach(item=>{hm+='<tr><td class="text-nowrap">'+esc(item.tanggal)+'</td><td>'+esc(item.uraian)+'</td><td class="text-end fw-bold text-success">Rp '+item.nominal.toLocaleString('id-ID')+'</td></tr>';});}document.getElementById("kasBodyMasuk").innerHTML=hm;let hk='';if(res.rincianKeluar.length===0){hk='<tr><td colspan="3" class="text-center text-muted">Tidak ada pengeluaran</td></tr>';}else{res.rincianKeluar.forEach(item=>{hk+='<tr><td class="text-nowrap">'+esc(item.tanggal)+'</td><td>'+esc(item.uraian)+'</td><td class="text-end fw-bold text-danger">Rp '+item.nominal.toLocaleString('id-ID')+'</td></tr>';});}document.getElementById("kasBodyKeluar").innerHTML=hk;}catch(e){toast(e.message,true);}finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-search me-1"></i>Cari';}}
     function salinLaporanKas(){if(!kasLaporanCache){toast('Data laporan belum dimuat.',true);return;}const r=kasLaporanCache;let teks="*LAPORAN KEUANGAN KAS RUKUN WARGA (RW)*\n*Periode: "+r.namaBulanTeks+" "+r.tahunTeks+"*\n-------------------------\n\n*A. SALDO AWAL*\no Total Saldo Awal: Rp "+r.saldoAwal.toLocaleString('id-ID')+"\n\n*B. RINCIAN PEMASUKAN*\n";if(r.rincianMasuk.length===0){teks+="- Belum ada pemasukan -\n";}else{r.rincianMasuk.forEach((item,i)=>{teks+=(i+1)+". "+item.tanggal+" - "+item.uraian+": Rp "+item.nominal.toLocaleString('id-ID')+"\n";});}teks+="o *TOTAL PEMASUKAN: Rp "+r.totalMasuk.toLocaleString('id-ID')+"*\n\n*C. RINCIAN PENGELUARAN*\n";if(r.rincianKeluar.length===0){teks+="- Belum ada pengeluaran -\n";}else{r.rincianKeluar.forEach((item,i)=>{teks+=(i+1)+". "+item.tanggal+" - "+item.uraian+": Rp "+item.nominal.toLocaleString('id-ID')+"\n";});}teks+="o *TOTAL PENGELUARAN: Rp "+r.totalKeluar.toLocaleString('id-ID')+"*\n\n-------------------------\n*D. SALDO AKHIR*\n\no (Rp "+r.saldoAwal.toLocaleString('id-ID')+" + Rp "+r.totalMasuk.toLocaleString('id-ID')+") - Rp "+r.totalKeluar.toLocaleString('id-ID')+"\n\no *TOTAL SALDO AKHIR: Rp "+r.saldoAkhir.toLocaleString('id-ID')+"*\n-------------------------\nData diperbarui otomatis secara realtime.";const el=document.createElement('textarea');el.value=teks;document.body.appendChild(el);el.select();document.execCommand('copy');document.body.removeChild(el);document.getElementById('toastMessage').textContent='Laporan periode '+r.namaBulanTeks+' sudah disalin ke clipboard.';toast();}
@@ -1186,7 +1243,14 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     document.getElementById('userModal').addEventListener('show.bs.modal',()=>{const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');toggleMenuPermission();renderMenuCheckboxes([]);});
     document.getElementById('userModal').addEventListener('hidden.bs.modal',resetUserForm);
     document.getElementById('userRole').addEventListener('change',toggleMenuPermission);
-    function logout(notifyServer=true){if(notifyServer)apiRequest('logout').catch(()=>{});localStorage.removeItem('rw26_session');sessionStorage.removeItem('rw26_session');location.replace('login.html');}
+    // Sesi disimpan oleh Supabase Auth, bukan di localStorage. Bridge
+    // rw26-api.js yang memanggil signOut; storage cukup dibersihkan
+    // untuk membuang sisa versi lama.
+    function logout(notifyServer=true){
+      if(notifyServer)apiRequest('logout').catch(()=>{});
+      localStorage.removeItem('rw26_session');sessionStorage.removeItem('rw26_session');
+      location.replace('login.html');
+    }
     function muatProfilSaya(){
       const u=session?.user;if(!u)return;
       document.getElementById('profilNama').textContent=u.nama||'-';
@@ -1224,7 +1288,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
           toast('Password berhasil diubah. Silakan login kembali dengan password baru.');
           setTimeout(()=>logout(false),2000);
         }else{
-          if(res.user){session.user=res.user;localStorage.setItem('rw26_session',JSON.stringify(session));}
+          if(res.user){session.user=res.user;window.RW26_PROFILE=Object.assign({},window.RW26_PROFILE,res.user);}
           toast('Profil berhasil diperbarui.');
           document.getElementById('profilCurrentPassword').value='';
           document.getElementById('profilNewPassword').value='';
@@ -1263,6 +1327,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     renderSidebar();renderAnnouncements();renderNews();renderFacilities();renderOrg();muatProfilSaya();
     loadDashboardData();loadActivity();
     const initial=location.hash.slice(1); if(initial&&document.getElementById(initial)) navigate(initial);
+  })();
   </script>
 </body>
 </html>

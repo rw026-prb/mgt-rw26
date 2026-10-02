@@ -1,0 +1,34 @@
+# Kredensial
+.env
+.env.local
+*.env
+!*.env.example
+
+# Rahasia yang tidak boleh masuk repository
+*.pem
+*.key
+service-account*.json
+user-credentials-*.csv
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Database lokal untuk pengujian SQL
+supabase/tools/pgdata/
+supabase/tools/pg_log/
+supabase/tools/postmaster.pid
+
+# Berkas sementara
+*.bak
+*.log
+validate2.txt
+v2.txt
+validate-out.txt
+
+# Editor / sistem operasi
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+desktop.ini

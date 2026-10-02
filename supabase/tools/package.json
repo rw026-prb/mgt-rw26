@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "rw026-supabase-tools",
   "private": true,
   "type": "module",
@@ -6,6 +6,8 @@
   "scripts": {
     "test": "node test-lib.mjs && node test-migrate.mjs",
     "test:sql": "node validate-migrations.cjs",
+    "test:rahasia": "node cek-rahasia.mjs",
+    "cek:aksi": "node cek-aksi.mjs",
     "smoke": "node smoke.mjs",
     "migrate:dry": "node migrate.mjs --dry-run",
     "split": "node split-codegs.mjs",
@@ -23,3 +25,4 @@
     "node": ">=18"
   }
 }
+

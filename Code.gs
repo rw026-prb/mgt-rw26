@@ -168,6 +168,13 @@ function doPost(e) {
       case 'toggleVideoKegiatan': return toggleVideoKegiatan_(body);
       case 'deleteVideoKegiatan': return deleteVideoKegiatan_(body);
 
+      // ---- Operasi auth. Butuh kunci service_role yang TIDAK BOLEH ada di
+      //      browser, jadi tetap lewat Apps Script yang menyimpannya di
+      //      Script Properties. ----
+      case 'createUser': return createSupabaseUser_(body);
+      case 'updateUser': return updateSupabaseUser_(body);
+      case 'deleteUser': return deleteSupabaseUser_(body);
+
       // ---- Upload foto untuk modul yang datanya ada di Supabase ----
       case 'uploadDriveImage': return uploadDriveImage_(body);
 
@@ -176,6 +183,203 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, message: err.message || 'Terjadi kesalahan server.' });
   }
+}
+
+// ============================================================================
+//  MANAJEMEN PENGGUNA
+// ============================================================================
+//  Tiga operasi ini TIDAK bisa dilakukan dari browser. Membuat atau menghapus
+//  akun Supabase Auth menuntut kunci service_role, sedangkan kunci itu tidak
+//  boleh pernah masuk ke kode yang dikirim ke pengguna. Jadi Keyscript
+//  File ini menjadi perantara: menyimpan kunci di Script Properties, memvalidasi
+//  pengirim lewat token Supabase, lalu meneruskan permintaan ke Supabase
+//  Admin API.
+//
+//  Yang BOLEH dilakukan langsung dari browser (lewat RLS):
+//    - membaca daftar pengguna
+//    - mengubah role, status, menu akses, nama, nomor HP
+//  Yang TIDAK boleh, dan karena itu ada di file ini:
+//    - membuat akun
+//    - menghapus akun
+//    - mengganti email / password
+function supabaseAdmin_(method, path, payload) {
+  const cfg = supabaseConfig_();
+  if (!cfg.url || !cfg.serviceRoleKey) {
+    throw new Error('Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().');
+  }
+  const options = {
+    method: method,
+    headers: {
+      apikey: cfg.serviceRoleKey,
+      Authorization: 'Bearer ' + cfg.serviceRoleKey,
+      'Content-Type': 'application/json'
+    },
+    muteHttpExceptions: true
+  };
+  if (payload !== undefined) options.payload = JSON.stringify(payload);
+  const res = UrlFetchApp.fetch(cfg.url + path, options);
+  const text = res.getContentText();
+  const code = res.getResponseCode();
+  if (code < 200 || code >= 300) {
+    let msg = text;
+    try { msg = JSON.parse(text).msg || JSON.parse(text).message || text; } catch (e) { /* biarkan teks */ }
+    throw new Error('Supabase menolak: ' + msg);
+  }
+  return text ? JSON.parse(text) : {};
+}
+
+function supabaseRoleFilter_(role) {
+  return ['Super Admin', 'Admin', 'Editor'].indexOf(String(role || '')) >= 0 ? role : 'Editor';
+}
+
+function parseMenuAkses_(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || '[]'));
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function createSupabaseUser_(body) {
+  // Hanya Super Admin yang boleh menambah pengguna.
+  const actor = requireSupabaseUser_(body.token);
+  if (actor.role !== 'Super Admin') {
+    throw new Error('Hanya Super Admin yang dapat menambah pengguna.');
+  }
+
+  const u = body.user || {};
+  const email = String(u.email || '').trim().toLowerCase();
+  const nama = String(u.nama || '').trim();
+  const password = String(u.password || '');
+  if (!email || email.indexOf('@') < 1) throw new Error('Email wajib diisi dengan benar.');
+  if (!nama) throw new Error('Nama wajib diisi.');
+  if (password.length < 8) throw new Error('Password minimal 8 karakter.');
+
+  const role = supabaseRoleFilter_(u.role);
+  const status = String(u.status || 'Aktif').toLowerCase() === 'aktif' ? 'Aktif' : 'Nonaktif';
+
+  // 1. Buat akun di auth.users. Baris profiles dibuat otomatis oleh trigger
+  //    tg_auth_user_created yang terpasang di 0002_rls.sql.
+  let created;
+  try {
+    created = supabaseAdmin_('post', '/auth/v1/admin/users', {
+      email: email,
+      password: password,
+      email_confirm: true,
+      user_metadata: { nama: nama },
+      app_metadata: { role: role, wilayah: String(u.wilayah || 'RW026') }
+    });
+  } catch (e) {
+    if (/already|registered|exists/i.test(e.message)) {
+      throw new Error('Email tersebut sudah terdaftar. Gunakan email lain.');
+    }
+    throw e;
+  }
+  if (!created || !created.id) throw new Error('Supabase tidak mengembalikan id pengguna.');
+
+  // 2. Isi sisa kolom profiles. Kolom legacy_id dibiarkan kosong supaya
+  //    trigger mengisinya dengan RW-NNNN berikutnya.
+  try {
+    supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(created.id), {
+      nama: nama,
+      no_hp: String(u.noHp || '') || null,
+      role: role,
+      wilayah: String(u.wilayah || 'RW026'),
+      status: status,
+      menu_access: role === 'Editor' ? parseMenuAkses_(u.menuAkses) : [],
+      must_change_pw: true
+    });
+  } catch (e) {
+    console.warn('profiles gagal diperbarui untuk ' + email + ': ' + e.message);
+  }
+
+  logActivity_(actor, 'create', 'users', 'Menambah pengguna ' + nama + ' (' + role + ')');
+  return json_({ ok: true, message: 'Pengguna berhasil ditambahkan.', userId: created.id });
+}
+
+function updateSupabaseUser_(body) {
+  const actor = requireSupabaseUser_(body.token);
+  if (actor.role !== 'Super Admin' && actor.role !== 'Admin') {
+    throw new Error('Anda tidak memiliki akses untuk tindakan ini.');
+  }
+
+  const u = body.user || {};
+  const legacyId = String(u.userId || '').trim();
+  if (!legacyId) throw new Error('ID pengguna wajib diisi.');
+
+  const cfg = supabaseConfig_();
+  const found = fetchSupabaseProfileByLegacyId_(cfg, legacyId);
+  if (!found) throw new Error('Pengguna tidak ditemukan.');
+
+  const role = supabaseRoleFilter_(u.role);
+  // Super Admin tidak boleh menurunkan haknya sendiri, supaya tidak pernah
+  // terkunci di luar portal.
+  if (actor.role === 'Admin' && (found.role === 'Super Admin' || role === 'Super Admin')) {
+    throw new Error('Admin tidak dapat mengubah pengguna bertingkat Super Admin.');
+  }
+  if (actor.id === found.id && role !== actor.role) {
+    throw new Error('Anda tidak dapat mengubah role sendiri.');
+  }
+
+  const status = String(u.status || 'Aktif').toLowerCase() === 'aktif' ? 'Aktif' : 'Nonaktif';
+  supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(found.id), {
+    nama: String(u.nama || found.nama).trim(),
+    no_hp: String(u.noHp || '') || null,
+    role: role,
+    wilayah: String(u.wilayah || found.wilayah || 'RW026'),
+    status: status,
+    menu_access: role === 'Editor' ? parseMenuAkses_(u.menuAkses) : []
+  });
+
+  // Email dan password hanya bisa diubah lewat Supabase Auth. Tidak
+  // termasuk di sini supaya tidak diam-diam mengganti kredensial login.
+  if (u.password) {
+    if (String(u.password).length < 8) throw new Error('Password minimal 8 karakter.');
+    supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(found.id), {
+      password: String(u.password)
+    });
+  }
+
+  logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + legacyId);
+  return json_({ ok: true, message: 'Data pengguna diperbarui.' });
+}
+
+function deleteSupabaseUser_(body) {
+  const actor = requireSupabaseUser_(body.token);
+  if (actor.role !== 'Super Admin') {
+    throw new Error('Hanya Super Admin yang dapat menghapus pengguna.');
+  }
+
+  const legacyId = String(body.userId || '').trim();
+  const cfg = supabaseConfig_();
+  const found = fetchSupabaseProfileByLegacyId_(cfg, legacyId);
+  if (!found) throw new Error('Pengguna tidak ditemukan.');
+  if (found.id === actor.id) throw new Error('Anda tidak dapat menghapus akun sendiri.');
+  if (found.role === 'Super Admin') {
+    throw new Error('Pengguna Super Admin hanya dapat dinonaktifkan, tidak dihapus.');
+  }
+
+  // Hapus dari auth.users lebih dulu. Baris profiles ikut terhapus karena
+  // kolomnya memakai ON DELETE CASCADE.
+  supabaseAdmin_('delete', '/auth/v1/admin/users/' + encodeURIComponent(found.id));
+
+  logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + legacyId);
+  return json_({ ok: true, message: 'Pengguna berhasil dihapus.' });
+}
+
+function fetchSupabaseProfileByLegacyId_(cfg, legacyId) {
+  const url = cfg.url + '/rest/v1/profiles'
+    + '?select=id,legacy_id,nama,role,status,wilayah,menu_access'
+    + '&legacy_id=eq.' + encodeURIComponent(legacyId);
+  const res = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: { apikey: cfg.serviceRoleKey, Authorization: 'Bearer ' + cfg.serviceRoleKey },
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) return null;
+  const rows = JSON.parse(res.getContentText());
+  return (Array.isArray(rows) && rows.length) ? rows[0] : null;
 }
 
 // ============================================================================

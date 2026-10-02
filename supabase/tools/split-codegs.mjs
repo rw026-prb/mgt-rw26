@@ -16,9 +16,14 @@
 // ============================================================================
 
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as acorn from 'acorn';
 
-const SRC = 'D:/Website RW/Mgt-portal RW/Code.gs';
+// Path relatif ke file ini, bukan hard-coded. Supaya jalan di mana saja.
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const SRC = path.join(REPO, 'Code.gs');
+const OUT = path.join(REPO, 'Code.gs.baru');
 const APPLY = process.argv.includes('--apply');
 
 const src = fs.readFileSync(SRC, 'utf8');
@@ -158,7 +163,7 @@ const keluar = [];
 for (let i = 0; i < lines.length; i++) if (!buangIdx.has(i)) keluar.push(lines[i]);
 const teks = keluar.join('\n').replace(/\n{3,}/g, '\n\n');
 
-fs.writeFileSync('D:/Website RW/Mgt-portal RW/Code.gs.baru', teks, 'utf8');
+fs.writeFileSync(OUT, teks, 'utf8');
 console.log(`\nDitulis: Code.gs.baru  (${keluar.length} baris, dari ${lines.length})`);
 
 // ---------------------------------------------------------------------------

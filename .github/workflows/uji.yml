@@ -1,0 +1,114 @@
+# ============================================================================
+#  Uji otomatis - Portal Manajemen RW 26
+# ============================================================================
+#  Menjalankan pengujian setiap kali ada perubahan yang di-push ke main.
+#
+#  TIDAK MEMBUTUHKAN SATU PUN SECRET.
+#
+#  Pengujian SQL memakai embedded-postgres, yaitu binary PostgreSQL sungguhan
+#  yang diunduh ke dalam runner. Karena database-nya sementara dan lokal,
+#  tidak ada kredensial Supabase yang perlu disimpan di GitHub Secrets.
+#
+#  Kuncinya: skrip migrasi (migrate.mjs) SENGAJA tidak dijalankan di sini.
+#  Migrasi menulis ke database produksi dan membaca Google Sheets, jadi itu
+#  harus tetap dilakukan manual oleh manusia.
+# ============================================================================
+name: Uji
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Hanya satu yang boleh jalan sekaligus. Menghemat kuota menit runner, dan
+# tidak ada gunanya menjalankan pengujian yang sama dua kali.
+concurrency:
+  group: uji-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  uji:
+    name: Pengujian
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: supabase/tools
+
+    steps:
+      - name: Ambil kode
+        uses: actions/checkout@v4
+
+      - name: Pasang Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: supabase/tools/package-lock.json
+
+      - name: Pasang dependensi
+        run: npm ci
+
+      - name: Periksa sintaks semua berkas JavaScript
+        run: |
+          set -e
+          gagal=0
+          while IFS= read -r f; do
+            if ! node --check "$f"; then
+              echo "::error file=$f::sintaks tidak valid"
+              gagal=1
+            fi
+          done < <(find ../.. -name '*.mjs' -not -path '*/node_modules/*')
+          while IFS= read -r f; do
+            if ! node --check "$f"; then
+              echo "::error file=$f::sintaks tidak valid"
+              gagal=1
+            fi
+          done < <(find ../.. -name '*.js' -not -path '*/node_modules/*' -not -path '*/pgdata/*')
+          exit $gagal
+
+      - name: Uji fungsi parsing dan tanggal
+        run: node test-lib.mjs
+
+      - name: Uji transformasi data dari Sheets
+        run: node test-migrate.mjs
+
+      - name: Uji seluruh file SQL di PostgreSQL sungguhan
+        run: node validate-migrations.cjs
+
+      - name: Cocokkan aksi portal dengan jembatan dan Code.gs
+        run: node cek-aksi.mjs
+
+      - name: Pastikan tidak ada kunci service_role di berkas frontend
+        run: node cek-rahasia.mjs
+
+      - name: Pastikan file yang tidak boleh di-commit memang ter-ignore
+        run: |
+          # .env memuat kunci service_role. Kalau sampai ter-commit, seluruh
+          # isi database bisa dibaca siapa saja. Hentikan build di sini.
+          ignored=$(git check-ignore -q supabase/tools/.env && echo ya || echo tidak)
+          if [ "$ignored" = "tidak" ]; then
+            echo "::error::supabase/tools/.env tidak ter-ignore. Perbaiki .gitignore."
+            exit 1
+          fi
+          echo "OK: .env ter-ignore."
+          if git ls-files --error-unmatch supabase/tools/.env >/dev/null 2>&1; then
+            echo "::error::supabase/tools/.env sudah pernah di-commit. Wajib hapus dari riwayat."
+            exit 1
+          fi
+          echo "OK: .env tidak pernah masuk riwayat git."
+
+      - name: Pastikan kredensial Apps Script tidak ada di berkas yang ter-publish
+        run: |
+          if grep -q "SUPABASE_SERVICE_ROLE_KEY" ../../Code.gs; then
+            echo "::error::Code.gs memuat kunci service_role secara langsung."
+            echo "::error::Kuncinya harus disimpan di Script Properties, bukan di dalam file."
+            exit 1
+          fi
+          echo "OK: Code.gs tidak memuat kunci secara langsung."

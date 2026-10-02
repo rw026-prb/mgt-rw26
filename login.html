@@ -42,11 +42,11 @@
       <div class="feature-list mt-5"><span class="feature-pill"><i class="bi bi-shield-check text-warning"></i> Aman</span><span class="feature-pill"><i class="bi bi-lightning-charge text-warning"></i> Cepat</span><span class="feature-pill"><i class="bi bi-people text-warning"></i> Terintegrasi</span></div>
     </div></div>
     <div class="col-lg-6 form-panel"><main class="login-card">
-      <div class="mb-4"><div class="text-success fw-bold small mb-2">SELAMAT DATANG</div><h2 class="fw-bold mb-2">Masuk ke Portal</h2><p class="text-secondary">Gunakan email atau User ID yang terdaftar.</p></div>
-      <div class="alert alert-warning setup-alert d-none" id="setupAlert"><i class="bi bi-exclamation-triangle-fill me-2"></i>Backend belum dikonfigurasi. Isi URL Web App pada <strong>config.js</strong>.</div>
+      <div class="mb-4"><div class="text-success fw-bold small mb-2">SELAMAT DATANG</div><h2 class="fw-bold mb-2">Masuk ke Portal</h2><p class="text-secondary">Gunakan email yang terdaftar.</p></div>
+      <div class="alert alert-warning setup-alert d-none" id="setupAlert"><i class="bi bi-exclamation-triangle-fill me-2"></i>Backend belum dikonfigurasi. Isi URL Web App pada <strong>config.js</strong> (SUPABASE_URL dan SUPABASE_ANON_KEY).</div>
       <div class="alert alert-danger d-none" id="loginAlert" role="alert"></div>
       <form id="loginForm">
-        <div class="mb-3"><label for="identifier" class="form-label fw-semibold">Email atau User ID</label><div class="position-relative"><i class="bi bi-person field-icon"></i><input class="form-control" id="identifier" autocomplete="username" placeholder="contoh: RW-0000" required></div></div>
+        <div class="mb-3"><label for="identifier" class="form-label fw-semibold">Email</label><div class="position-relative"><i class="bi bi-person field-icon"></i><input class="form-control" id="identifier" autocomplete="username" placeholder="contoh: nama@email.com" required></div></div>
         <div class="mb-3"><div class="d-flex justify-content-between"><label for="password" class="form-label fw-semibold">Password</label></div><div class="position-relative"><i class="bi bi-lock field-icon"></i><input type="password" class="form-control pe-5" id="password" autocomplete="current-password" placeholder="Masukkan password" required><button class="password-toggle" id="togglePassword" type="button" aria-label="Tampilkan password"><i class="bi bi-eye"></i></button></div></div>
         <div class="d-flex justify-content-between align-items-center mb-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="remember"><label class="form-check-label small" for="remember">Ingat saya</label></div><a href="#" class="small text-decoration-none" id="forgotPasswordLink">Lupa password?</a></div>
         <button class="btn btn-success btn-login w-100 text-white" id="loginButton" type="submit"><span class="button-label">Masuk ke Portal</span><span class="spinner-border spinner-border-sm d-none" aria-hidden="true"></span></button>
@@ -81,50 +81,116 @@
   </div>
   <script src="config.js">  </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const cfg=window.RW26_CONFIG||{};
-    const configured=cfg.APPS_SCRIPT_URL&&cfg.APPS_SCRIPT_URL.startsWith('https://script.google.com/');
+    const configured=typeof cfg.SUPABASE_URL==='string'
+      &&cfg.SUPABASE_URL.startsWith('https://')
+      &&typeof cfg.SUPABASE_ANON_KEY==='string'
+      &&cfg.SUPABASE_ANON_KEY.length>20;
     if(!configured) document.getElementById('setupAlert').classList.remove('d-none');
-  
-    const savedSession = JSON.parse(
-  localStorage.getItem('rw26_session') ||
-  sessionStorage.getItem('rw26_session') ||
-  'null'
-);
 
-if (
-  savedSession &&
-  savedSession.token &&
-  savedSession.expiresAt &&
-  savedSession.expiresAt > Date.now()
-) {
-  location.replace('index.html');
-}
+    const sb = configured
+      ? window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY)
+      : null;
+
+    // Pesan yang dikirim login.html?err=... oleh index.html
+    const PESAN = {
+      konfigurasi: 'Konfigurasi Supabase belum diisi pada config.js.',
+      profil: 'Data profil Anda tidak dapat dibaca. Hubungi Super Admin.',
+      'profil-kosong': 'Profil Anda belum dibuat di database. Hubungi Super Admin.',
+      nonaktif: 'Akun Anda sedang dinonaktifkan. Hubungi administrator.'
+    };
+    const alasan = new URLSearchParams(location.search).get('err');
+    if (alasan && PESAN[alasan]) {
+      const el = document.getElementById('loginAlert');
+      el.textContent = PESAN[alasan];
+      el.classList.remove('d-none');
+    }
+
+    // Sudah punya sesi? Langsung ke portal. Pemeriksaan dilakukan setelah
+    // komponen siap, karena getSession() bersifat asynchronous.
+    (async () => {
+      if (!sb) return;
+      const r = await sb.auth.getSession();
+      if (r.data && r.data.session) {
+        const id = r.data.session.user.id;
+        const p = await sb.from('profiles').select('id,status').eq('id',id).limit(1);
+        const profil = p.data && p.data[0];
+        if (profil && String(profil.status).toLowerCase() === 'aktif') {
+          location.replace('index.html');
+        }
+      }
+    })();
 
     document.getElementById('togglePassword').onclick=()=>{const input=document.getElementById('password');input.type=input.type==='password'?'text':'password';document.querySelector('#togglePassword i').className=`bi bi-eye${input.type==='password'?'':'-slash'}`;};
-    async function api(payload){
-      if(!configured) throw new Error('Backend Google Apps Script belum dikonfigurasi.');
-      const response=await fetch(cfg.APPS_SCRIPT_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
-      const data=await response.json(); if(!data.ok) throw new Error(data.message||'Permintaan gagal.'); return data;
-    }
+
     document.getElementById('loginForm').onsubmit=async e=>{
-      e.preventDefault(); const button=document.getElementById('loginButton'), alert=document.getElementById('loginAlert');
-      alert.classList.add('d-none');button.disabled=true;button.querySelector('.button-label').classList.add('d-none');button.querySelector('.spinner-border').classList.remove('d-none');
-      try { const data=await api({action:'login',identifier:document.getElementById('identifier').value.trim(),password:document.getElementById('password').value}); const storage=document.getElementById('remember').checked?localStorage:sessionStorage;storage.setItem('rw26_session',JSON.stringify({token:data.token,user:data.user,expiresAt:data.expiresAt}));location.replace('index.html'); }
-      catch(err){alert.textContent=err.message;alert.classList.remove('d-none');button.disabled=false;button.querySelector('.button-label').classList.remove('d-none');button.querySelector('.spinner-border').classList.add('d-none');}
+      e.preventDefault();
+      const button=document.getElementById('loginButton')
+        ,alert=document.getElementById('loginAlert')
+        ,identifier=document.getElementById('identifier').value.trim()
+        ,password=document.getElementById('password').value;
+      alert.classList.add('d-none');
+      if(!configured){alert.textContent=PESAN.konfigurasi;alert.classList.remove('d-none');return;}
+      button.disabled=true;
+      button.querySelector('.button-label').classList.add('d-none');
+      button.querySelector('.spinner-border').classList.remove('d-none');
+      try{
+        // Supabase Auth memakai EMAIL, bukan User ID. Kolom "identifier"
+        // sengaja dibiarkan untuk tampilan, tapi isinya harus email.
+        const {error}=await sb.auth.signInWithPassword({email:identifier,password});
+        if(error) throw new Error(
+          /invalid login credentials/i.test(error.message)
+            ? 'Email atau password salah.'
+            : error.message
+        );
+        location.replace('index.html');
+      }catch(err){
+        alert.textContent=err.message;alert.classList.remove('d-none');
+        button.disabled=false;
+        button.querySelector('.button-label').classList.remove('d-none');
+        button.querySelector('.spinner-border').classList.add('d-none');
+      }
     };
-    document.getElementById('forgotPasswordLink').onclick=e=>{e.preventDefault();document.getElementById('resetAlert').classList.add('d-none');document.getElementById('resetSuccess').classList.add('d-none');document.getElementById('forgotPasswordForm').reset();new bootstrap.Modal('#forgotPasswordModal').show();};
+
+    document.getElementById('forgotPasswordLink').onclick=e=>{
+      e.preventDefault();
+      document.getElementById('resetAlert').classList.add('d-none');
+      document.getElementById('resetSuccess').classList.add('d-none');
+      document.getElementById('forgotPasswordForm').reset();
+      new bootstrap.Modal('#forgotPasswordModal').show();
+    };
+
     document.getElementById('forgotPasswordForm').onsubmit=async e=>{
       e.preventDefault();
-      const btn=document.getElementById('resetSubmit'),alertEl=document.getElementById('resetAlert'),successEl=document.getElementById('resetSuccess');
+      const btn=document.getElementById('resetSubmit')
+        ,alertEl=document.getElementById('resetAlert')
+        ,successEl=document.getElementById('resetSuccess')
+        ,email=document.getElementById('resetEmail').value.trim();
       alertEl.classList.add('d-none');successEl.classList.add('d-none');
-      btn.disabled=true;btn.querySelector('.reset-btn-label').classList.add('d-none');btn.querySelector('.reset-spinner').classList.remove('d-none');
+      if(!configured){alertEl.textContent=PESAN.konfigurasi;alertEl.classList.remove('d-none');return;}
+      btn.disabled=true;
+      btn.querySelector('.reset-btn-label').classList.add('d-none');
+      btn.querySelector('.reset-spinner').classList.remove('d-none');
       try{
-        const res=await api({action:'requestPasswordReset',email:document.getElementById('resetEmail').value.trim()});
-        successEl.textContent=res.message;successEl.classList.remove('d-none');
+        // Selalu menampilkan pesan yang sama, apa pun hasilnya. Kalau
+        // jawabannya berbeda tergantung email terdaftar, itu memberi tahu
+        // penyerang email mana yang sudah punya akun.
+        const {error}=await sb.auth.resetPasswordForEmail(email,{
+          redirectTo: location.origin + location.pathname.replace(/[^/]*$/,'update-password.html')
+        });
+        if(error) throw new Error(error.message);
+        successEl.textContent='Link reset password telah dikirim ke email tersebut jika terdaftar.';
+        successEl.classList.remove('d-none');
         document.getElementById('forgotPasswordForm').reset();
-      }catch(err){alertEl.textContent=err.message;alertEl.classList.remove('d-none');}
-      finally{btn.disabled=false;btn.querySelector('.reset-btn-label').classList.remove('d-none');btn.querySelector('.reset-spinner').classList.add('d-none');}
+      }catch(err){
+        alertEl.textContent=err.message;alertEl.classList.remove('d-none');
+      }finally{
+        btn.disabled=false;
+        btn.querySelector('.reset-btn-label').classList.remove('d-none');
+        btn.querySelector('.reset-spinner').classList.add('d-none');
+      }
     };
   </script>
 </body>

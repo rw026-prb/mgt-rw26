@@ -2,101 +2,100 @@
 
 Portal administrasi untuk RW 26 Pengasinan, Rawalumbu.
 
-> **STATUS: sedang migrasi ke Supabase.**
-> Data sudah dipindahkan. `Code.gs` sudah ditipiskan. Portal admin
-> (`index.html`) dan portal warga (`Website-RW26`) belum diarahkan ke
-> Supabase - selama itu belum selesai, keduanya masih membaca dari Apps
-> Script seperti biasa.
+> **STATUS: seluruh migrasi ke Supabase sudah selesai di sisi kode.**
+> Semua data ada di PostgreSQL, `Code.gs` sudah ditipiskan, dan kedua portal
+> sudah mengarah ke Supabase. Yang tersisa adalah pengujian menyeluruh, deployment, dan pengaturan domain.
 
-## Arsitektur sekarang
+## Arsitektur
 
 | Lapisan | Isi | Tempat |
 |---|---|---|
 | Data | Himbauan, pengumuman, fasum, organisasi, statistik, kas, user, log | **Supabase (PostgreSQL)** |
-| Media | Foto galeri, foto berita, foto modul lain | **Google Drive** (tetap) |
-| Media metadata | Album, `video`, `video_kegiatan`, `berita` | **Google Sheets** (tetap, hanya 4 tab) |
-| Galeri, video, berita | Diproses oleh | **Google Apps Script** (`Code.gs`, sudah tipis dari 2.042 jadi 996 baris) |
-| Foto modul Supabase | Diunggah lewat aksi `uploadDriveImage` | **Apps Script → Drive** |
+| Media | Foto galeri, foto berita, foto modul lain | **Google Drive** |
+| Media metadata | Album, `berita`, `video`, `video_kegiatan` | **Google Sheets** (4 tab) |
+| Galeri, berita, video | Diproses oleh | **Apps Script** (`Code.gs`, 996 dari 2.042 baris) |
+| Unggah foto modul Supabase | Lewat aksi `uploadDriveImage` | **Apps Script → Drive** |
 
-Yang **tidak lagi** ditangani `Code.gs`: autentikasi, sesi, pengguna, kas,
-statistik, organisasi, fasilitas, pengumuman, himbauan, log pengunjung, dan log
-aktivitas. Semuanya dipindah ke Supabase.
+Skema database ada di `supabase/migrations/`. Alat migrasi dan pengujian ada di
+`supabase/tools/` (lihat README-nya di sana).
 
-Detail skema database ada di `supabase/migrations/`. Alat migrasi dan pengujian
-ada di `supabase/tools/` (lihat README-nya di sana).
+## Langkah menjalankan
 
-## Menjalankan
+### 1. Database
 
-### 1. Siapkan backend Apps Script
+Jalankan file di `supabase/migrations/` **berurutan** lewat Supabase SQL Editor:
 
-1. Buka spreadsheet RW 26 → **Extensions → Apps Script**.
-2. Salin isi `Code.gs` proyek ini ke editor Apps Script (ganti seluruh isi).
-3. **Pasang kredensial Supabase** — jalankan fungsi `setupSupabaseConfig_` satu
-   kali dari editor, dengan ketiga nilai dari Supabase → Project Settings → API:
+```
+0001_schema.sql            9 tabel
+0002_rls.sql               Row Level Security + fungsi bantu
+0002b_lockdown.sql         cabut hak akses langsung untuk peran anon
+0003_functions.sql         7 fungsi laporan (kas, konten, pengunjung)
+0004_migration_audit.sql   jejak migrasi
+0005_bridge_grants.sql     izin service_role untuk Apps Script
+0006_organisasi_id.sql     ID otomatis untuk tabel organisasi
+```
 
-   ```javascript
-   setupSupabaseConfig_(
-     'https://xxxxxxxx.supabase.co',
-     'kunci-anon-public',
-     'kunci-service-role'
-   );
-   ```
+Setiap file dibungkus `begin; ... commit;`, jadi kalau ada baris yang gagal
+seluruh file dibatalkan dan database tidak berubah. Aman dijalankan berulang kali.
 
-   Nilai disimpan di **Script Properties**, bukan di dalam `Code.gs` - file ini
-   ikut ter-*commit* ke repository publik, jadi tidak boleh memuat kredensial.
+Sebelum menempelkan ke Supabase, jalankan pengujian di PostgreSQL lokal:
 
-4. Jalankan `setupGallerySheet`, `setupVideoSheet`, dan `setupVideoKegiatanSheet`
-   satu kali (hanya perlu kalau tab-nya belum ada).
-5. Jalankan `installWarmTrigger` satu kali. Trigger ini mengisi cache tiap 10
-   menit agar pengunjung tidak menunggu pembacaan spreadsheet.
-6. **Deploy → New deployment → Web app**, dengan **Execute as: Me** dan
-   **Who has access: Anyone**.
-7. Salin URL Web App, tempel ke `APPS_SCRIPT_URL` di `config.js`.
+```powershell
+cd supabase/tools
+npm install
+npm run test:sql
+```
 
-> **Rotasi URL.** `config.js` versi lama (yang masih ada di riwayat git)
-> memuat URL deployment yang sekarang sudah tidak dipakai. Buat **deployment
-> baru**, jangan memakai URL lama.
+### 2. Apps Script
 
-### 2. Jalankan portal
+1. Salin isi `Code.gs` ke editor Apps Script (ganti seluruh isi).
+2. Jalankan `setupSupabaseConfig_(url, anonKey, serviceRoleKey)` **sekali**.
+   Nilai disimpan di Script Properties — bukan di dalam `Code.gs`, karena file ini
+   ikut ter-*commit* ke repository publik.
+3. Jalankan `installWarmTrigger` sekali.
+4. **Deploy → New deployment → Web app**, **Execute as: Me**, **Who has access:
+   Anyone**.
 
-Buka `login.html` lewat web server lokal atau hosting.
+### 3. Halaman
 
-> Login masih memakai alur `login` versi lama dan **akan berhenti bekerja** begitu
-> portal diarahkan ke Supabase Auth (Fase 6). Sampai saat itu, jangan
-> Montessori data baru lewat portal -$data baru masuk ke Sheets, bukan
-> PostgreSQL.
+| File | Isi nilai |
+|---|---|
+| `config.js` | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `APPS_SCRIPT_URL` |
+| `Website-RW26/config.js` | Nilai yang sama |
+
+> `SUPABASE_ANON_KEY` memang dirancang untuk publik. Yang melindungi data adalah
+> aturan RLS di database. `service_role` **tidak boleh** muncul di file mana pun
+> yang dikirim ke browser.
+
+## Peran pengguna
+
+| Peran | Kemampuan |
+|---|---|
+| `Super Admin` | Semua menu. Satu-satunya yang boleh menambah dan menghapus pengguna. |
+| `Admin` | Semua menu kecuali menambah/menghapus pengguna. |
+| `Editor` | Hanya menu yang tercantum di `profiles.menu_access`. |
+
+Kas punya aturan tambahan: hanya `Admin`/`Super Admin` yang bisa menyetujui atau
+menolak transaksi, dan `Editor` hanya bisa mengubah transaksinya sendiri yang
+belum disetujui. Aturan ini ditegakkan di database (`0002_rls.sql`), bukan di
+browser.
 
 ## Aksi yang dilayani Apps Script
 
-| Modul | Aksi |
-|---|---|
-| Galeri Foto | `listGalleryAlbums`, `createGalleryAlbum`, `deleteGalleryAlbum`, `listGalleryPhotos`, `uploadGalleryPhoto`, `deleteGalleryPhoto` |
-| Berita | `listNews`, `createNews`, `updateNews`, `toggleNews`, `deleteNews` |
-| Video Sambutan | `listVideos`, `createVideo`, `updateVideo`, `toggleVideo`, `setVideoAutoplay`, `clearVideoAutoplay`, `deleteVideo` |
-| Video Kegiatan | `listVideoKegiatan`, `createVideoKegiatan`, `updateVideoKegiatan`, `toggleVideoKegiatan`, `deleteVideoKegiatan` |
-| Jembatan | `uploadDriveImage` |
+Galeri (6), Berita (5), Video Sambutan (7), Video Kegiatan (5), `uploadDriveImage`
+(1), dan manajemen pengguna (3: `createUser`, `updateUser`, `deleteUser`).
 
-Aksi baca publik: `publicContent` (kini hanya `news`, `gallery`, `videos`,
+Tiga aksi terakhir wajib lewat Apps Script karena memakai kunci `service_role`
+yang tidak boleh ada di browser.
+
+Baca publik: `publicContent` (hanya `news`, `gallery`, `videos`,
 `videoKegiatan`) dan `publicGalleryPhotos`.
-
-## Keamanan
-
-Web App dideploy dengan akses **Anyone**, jadi endpoint-nya bisa dipanggil siapa
-saja. Setiap aksi tulis memanggil `requireSupabaseUser_` +
-`requireMenuAccess_` lebih dulu. Aksi `uploadDriveImage` punya tiga lapis
-perlindungan: modul harus terdaftar di `DRIVE_FOLDER_BY_MODULE`, hak akses
-modul diperiksa, dan tipe MIME dibatasi.
-
-Kunci `service_role` memberi akses penuh ke database. Jangan pernah menaruhnya
-di `index.html`, `config.js`, atau `Code.gs`.
 
 ## Catatan performa
 
 - `publicContent` dilayani dari cache `public_content` yang disusun dari cache
-  per-modul; pembacaan Sheets hanya terjadi saat cache kosong.
+  per-modul.
 - `warmCache` (tiap 10 menit) mengisi cache halaman publik dan album galeri.
-  Jalankan manual dari editor setelah pembaruan besar.
-- Saat cache sedang dihitung dan kunci sedang dipakai, pembacaan lain dilayani
-  dari salinan last-known-good. Mencegah lonjakan saat banyak pengunjung datang
-  bersamaan.
-- Laporan kas tidak lagi di-cache di sini - dihitung oleh PostgreSQL.
+- Laporan kas tidak lagi di-cache di Apps Script - dihitung oleh PostgreSQL.
+- Website warga menggabungkan dua sumber (Apps Script + Supabase) secara
+  terpisah, sehingga kegagalan satu sisi tidak membuat halaman kosong seluruhnya.
