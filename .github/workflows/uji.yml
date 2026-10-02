@@ -79,13 +79,23 @@ jobs:
       - name: Uji transformasi data dari Sheets
         run: node test-migrate.mjs
 
+      - name: Uji deteksi private key
+        run: node test-privkey.mjs
+
       - name: Uji seluruh file SQL di PostgreSQL sungguhan
         run: node validate-migrations.cjs
 
       - name: Cocokkan aksi portal dengan jembatan dan Code.gs
         run: node cek-aksi.mjs
 
-      - name: Pastikan tidak ada kunci service_role di berkas frontend
+      - name: Pastikan tidak ada berkas terlarang yang ikut ter-track
+        # .gitignore hanya berlaku untuk berkas yang BELUM ter-track. Berkas
+        # yang sempat ter-commit sebelum .gitignore dibuat akan terus ikut
+        # ter-push, apa pun aturannya. Karena itu yang diperiksa adalah daftar
+        # berkas yang benar-benar sudah ter-track, bukan isi .gitignore saja.
+        run: node audit-gitignore.mjs
+
+      - name: Pastikan tidak ada kunci service_role di berkas yang ter-publish
         run: node cek-rahasia.mjs
 
       - name: Pastikan file yang tidak boleh di-commit memang ter-ignore
@@ -112,3 +122,9 @@ jobs:
         # cek-rahasia.mjs sudah memindai Code.gs (ekstensi .gs) bersama
         # seluruh berkas lain, jadi tidak perlu grep terpisah di sini.
         run: node cek-rahasia.mjs
+
+      - name: Periksa isi berkas yang sudah tayang di GitHub
+        # Lapisan terakhir: menarik isi berkas PERSIS seperti yang tersimpan di
+        # server GitHub, lalu memeriksa isinya. Nama berkas yang terlihat bersih
+        # bisa tetap menyembunyikan kunci di dalam config.js atau Code.gs.
+        run: node audit-github.mjs

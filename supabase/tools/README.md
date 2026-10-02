@@ -13,6 +13,10 @@ serta alat untuk mengujinya.
 | `validate-migrations.cjs` | Menjalankan seluruh file SQL di PostgreSQL lokal. |
 | `smoke.mjs` | Menguji jalur publik di Supabase produksi memakai kunci `anon`. |
 | `cek-aksi.mjs` | Mencocokkan aksi yang dipanggil portal dengan yang ditangani jembatan dan `Code.gs`. |
+| `cek-rahasia.mjs` | Memindai seluruh repo mencari kunci `service_role` dan private key. |
+| `audit-gitignore.mjs` | Empat lapis: berkas ter-*track* yang ter-ignore, nama terlarang, riwayat git, dan isi disk. |
+| `audit-github.mjs` | Menarik isi berkas **dari server GitHub** lalu memeriksa isinya. |
+| `test-privkey.mjs` | Menguji `audit-github.mjs` agar tidak salah positives maupun salah negatives. |
 | `split-codegs.mjs` | Memotong `Code.gs` menjadi bagian galeri/media saja. |
 
 Migrasi (`migrate.mjs`) tidak butuh dependency npm. Yang dibutuhkan hanya
@@ -25,6 +29,32 @@ sekadar pemeriksaan ejaan. Instalasi sekali di awal:
 ```powershell
 npm install
 ```
+
+## Perintah yang sering dipakai
+
+```powershell
+npm test              # 68 pengujian unit (parsing, transformasi, deteksi kunci)
+npm run test:sql      # seluruh file SQL di PostgreSQL lokal
+npm run audit         # 4 lapis pemeriksaan kebocoran
+npm run smoke         # jalur publik di produksi
+npm run migrate:dry   # baca Sheets, hitung, tapi jangan tulis
+```
+
+## Kenapa pemeriksaan rahasia bisa diandalkan
+
+Satu pemeriksaan yang hanya melaporkan "aman" tidak berarti apa-apa - ia bisa
+saja tidak bekerja. Karena itu `test-privkey.mjs` menguji pemeriksa itu sendiri
+dari dua arah:
+
+| Masukan | Diharapkan |
+|---|---|
+| Private key asli | terdeteksi |
+| Contoh di README yang isinya disingkat `...` | **tidak** terdeteksi |
+| Teks `PRIVATE KEY` di paragraf biasa | **tidak** terdeteksi |
+| Kunci `service_role` di `Code.gs` | terdeteksi |
+
+Kalau nanti polanya diubah, jalankan `npm test` lebih dulu sebelum
+mengunggahnya ke GitHub.
 
 ---
 
