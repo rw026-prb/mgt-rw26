@@ -16,6 +16,9 @@ npm-debug.log*
 
 # Database lokal untuk pengujian SQL
 supabase/tools/pgdata/
+# Uji membuat folder sementara bernama pgdata-XXXXXX. Kalau uji gagal di
+# tengah, folder itu tertinggal dan bisa ikut ter-commit tanpa pola di atas.
+supabase/tools/pgdata-*/
 supabase/tools/pg_log/
 supabase/tools/postmaster.pid
 
@@ -32,3 +35,5 @@ validate-out.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+# '0' pernah muncul dari redirect OneDrive/PowerShell yang salah
+/0
