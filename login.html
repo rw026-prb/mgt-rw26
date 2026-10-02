@@ -137,8 +137,16 @@
       button.querySelector('.button-label').classList.add('d-none');
       button.querySelector('.spinner-border').classList.remove('d-none');
       try{
-        // Supabase Auth memakai EMAIL, bukan User ID. Kolom "identifier"
-        // sengaja dibiarkan untuk tampilan, tapi isinya harus email.
+        // Supabase Auth memakai EMAIL, bukan User ID.
+        //
+        // Dulu form ini menerima keduanya, jadi banyak yang masih mengetik
+        // "RW-0000". Beri petunjuk yang jelas, bukan sekadar "gagal".
+        if(/^RW-\d+$/i.test(identifier)){
+          throw new Error(
+            'Masukkan EMAIL, bukan User ID. ID pengguna sudah tidak dipakai untuk login. '+
+            'Email tiap akun ada di berkas kredensial hasil migrasi.'
+          );
+        }
         const {error}=await sb.auth.signInWithPassword({email:identifier,password});
         if(error) throw new Error(
           /invalid login credentials/i.test(error.message)

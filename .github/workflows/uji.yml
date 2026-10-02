@@ -82,6 +82,13 @@ jobs:
       - name: Uji deteksi private key
         run: node test-privkey.mjs
 
+      - name: Uji alur ganti password untuk akun Editor
+        # Akun Editor tidak bisa mengubah tabel profiles sendiri, karena RLS
+        # membatasi perubahan pada tabel itu untuk Admin. Kalau penanda
+        # must_change_pw diturunkan lewat update biasa, akun Editor akan
+        # tersangkut di halaman ganti password selamanya - tanpa pesan error.
+        run: node test-ganti-password.mjs
+
       - name: Uji seluruh file SQL di PostgreSQL sungguhan
         run: node validate-migrations.cjs
 
