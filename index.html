@@ -580,6 +580,37 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script>
   (async () => {
+    // Tampilkan kegagalan ke pengguna, jangan ditelan diam-diam.
+    //
+    // Tanpa blok ini, galat apa pun di bawah ini berubah jadi "unhandled
+    // promise rejection": kerangka portal tetap tampil, tapi tidak ada menu
+    // dan tidak ada pesan apa pun. Itu persis gejala yang membuat bug
+    // rw26-api.js sulit dicari - portal terlihat hidup, tapi isinya kosong.
+    function tampilkanKegagalan(pesan) {
+      console.error('Portal gagal dijalankan:', pesan);
+      const tempat = document.getElementById('sidebarMenu');
+      if (tempat && !tempat.innerHTML.trim()) {
+        tempat.innerHTML = `
+          <div class="p-3">
+            <div class="alert alert-danger mb-2 py-2 small" role="alert">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i> Portal gagal dimuat.
+            </div>
+            <p class="small text-white-50 mb-2">${esc(pesan)}</p>
+            <button type="button" class="btn btn-sm btn-outline-light w-100" onclick="location.reload()">
+              <i class="bi bi-arrow-clockwise me-1"></i>Muat ulang
+            </button>
+          </div>`;
+      }
+    }
+
+    // Jembatan portal. Kalau berkasnya gagal dimuat atau gagal diparse,
+    // window.RW26 tidak akan pernah ada - dan tanpa pemeriksaan ini,
+    // await di bawah akan melempar TypeError yang tidak jelas penyebabnya.
+    if (!window.RW26 || !window.RW26.ready) {
+      tampilkanKegagalan('Modul portal (assets/js/rw26-api.js) gagal dimuat. Muat ulang halaman.');
+      return;
+    }
+
     // Tunggu sesi Supabase terkonfirmasi lebih dulu. Hampir seluruh isi portal
     // bergantung pada session.user (nama, role, menu akses), jadi membaca
     // data sebelum sesi siap akan menampilkan layar kosong atau - lebih buruk -
@@ -1344,7 +1375,11 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     renderSidebar();renderAnnouncements();renderNews();renderFacilities();renderOrg();muatProfilSaya();
     loadDashboardData();loadActivity();
     const initial=location.hash.slice(1); if(initial&&document.getElementById(initial)) navigate(initial);
-  })();
+  })().catch(function (galat) {
+    // Jaring pengaman terakhir. Tanpa ini, galat apa pun di dalam portal
+    // menjadi "unhandled rejection" yang tidak terlihat sama sekali.
+    tampilkanKegagalan(galat && galat.message ? galat.message : String(galat));
+  });
   </script>
 </body>
 </html>

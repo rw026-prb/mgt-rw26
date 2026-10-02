@@ -52,9 +52,13 @@ jobs:
           cache: npm
           cache-dependency-path: supabase/tools/package-lock.json
 
-      - name: Pasang dependensi
-        run: npm ci
-
+      # `node --check` tidak butuh satu pun dependensi npm, jadi pemeriksaan ini
+      # SENGAJA dijalankan sebelum `npm ci`.
+      #
+      # CATATAN: embedded-postgres@beta bisa gagal terpasang di runner. Kalau
+      # `npm ci` berada di depan, kegagalan itu menghentikan pipeline dan
+      # pemeriksaan sintaks TIDAK PERNAH jalan - persis celah yang membiarkan
+      # assets/js/rw26-api.js rusak sintaks sampai ke produksi.
       - name: Periksa sintaks semua berkas JavaScript
         run: |
           set -e
@@ -72,6 +76,9 @@ jobs:
             fi
           done < <(find ../.. -name '*.js' -not -path '*/node_modules/*' -not -path '*/pgdata/*')
           exit $gagal
+
+      - name: Pasang dependensi
+        run: npm ci
 
       - name: Uji fungsi parsing dan tanggal
         run: node test-lib.mjs

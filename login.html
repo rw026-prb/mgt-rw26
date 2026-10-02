@@ -99,7 +99,8 @@
       konfigurasi: 'Konfigurasi Supabase belum diisi pada config.js.',
       profil: 'Data profil Anda tidak dapat dibaca. Hubungi Super Admin.',
       'profil-kosong': 'Profil Anda belum dibuat di database. Hubungi Super Admin.',
-      nonaktif: 'Akun Anda sedang dinonaktifkan. Hubungi administrator.'
+      nonaktif: 'Akun Anda sedang dinonaktifkan. Hubungi administrator.',
+      jaringan: 'Tidak dapat terhubung ke server. Periksa koneksi internet Anda lalu muat ulang halaman.'
     };
     const alasan = new URLSearchParams(location.search).get('err');
     if (alasan && PESAN[alasan]) {
@@ -118,7 +119,8 @@
     // terlempar bolak-balik antara index.html dan login.html tanpa henti -
     // persis yang terjadi sebelum ada penjaga ini.
     //
-    // Penanda 'rw26_keluar_baru' dipasang oleh portal sebelumshed Leaves.
+    // Penanda 'rw26_keluar_baru' dipasang oleh portal sebelum mengarahkan
+    // pengguna ke halaman ini.
     const KELUAR_BARU='rw26_keluar_baru';
     const JEDA_KELUAR_MS=15000;
     function baruSajaDikeluarkan(){
@@ -140,14 +142,19 @@
         return;
       }
       const r = await sb.auth.getSession();
-      if (r.data && r.data.session) {
-        const id = r.data.session.user.id;
-        if (profil && String(profil.status).toLowerCase() === 'aktif') {
-          location.replace('index.html');
-            return;
-          }
-          location.replace('index.html');
-        }
+      // Arahkan ke portal hanya kalau kita TIDAK baru saja dilempar ke sini
+      // oleh index.html.
+      //
+      // `alasan` diisi dari ?err=..., jadi nilainya ada kalau index.html
+      // sudah menolaki sesi ini (profil hilang, akun nonaktif, atau server
+      // tidak terjangkau). Tanpa pemeriksaan `!alasan` di bawah, akun
+      // nonaktif akan terlempar bolak-balik tanpa henti: index.html
+      // -&gt; login.html?err=nonaktif -&gt; index.html -&gt; ...
+      //
+      // Penjaga 'baruSajaDikeluarkan()' di atas tidak menutup kasus ini,
+      // karena penandanya hanya dipasang saat pengguna sengaja keluar.
+      if (r.data && r.data.session && !alasan) {
+        location.replace('index.html');
       }
     })();
 

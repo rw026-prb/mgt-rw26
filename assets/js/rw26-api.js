@@ -766,57 +766,84 @@ window.RW26 = (function () {
     };
   }
 
+  /**
+   * Tutup jalur keluar dari bootstrap().
+   *
+   * `ready` WAJIB diselesaikan di setiap jalur keluar. Kalau tidak, promise
+   * itu menggantung selamanya, `await window.RW26.ready` di index.html ikut
+   * menggantung, dan portal tampil dengan menu kosong tanpa pesan apa pun.
+   *
+   * Diselesaikan dengan nilai falsy supaya index.html berhenti sendiri lewat
+   * `if (!window.RW26_SESSION) return;` - jadi halaman tidak juga menggantung
+   * kalau perpindahan halaman tertahan.
+   */
+  function stopAndRedirect(url) {
+    readyResolve(null);
+    location.replace(url);
+  }
+
   async function bootstrap() {
-    if (!configured() || !window.supabase) {
-      location.replace('login.html?err=konfigurasi');
-      return;
-    }
-    client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
-
-    var sb = client.auth.getSession();
-    if (sb.error || !sb.data || !sb.data.session) {
-      location.replace('login.html');
-      return;
-    }
-    var token = sb.data.session.access_token;
-    var email = sb.data.session.user.email;
-
-    var rows = await client.from('profiles').select('*').eq('id', sb.data.session.user.id).limit(1);
-    if (rows.error) {
-      location.replace('login.html?err=profil');
-      return;
-    }
-    if (!rows.data || !rows.data.length) {
-      location.replace('login.html?err=profil-kosong');
-      return;
-    }
-    profile = rows.data[0];
-    profile.email = email;
-
-    if (String(profile.status).toLowerCase() !== 'aktif') {
-      location.replace('login.html?err=nonaktif');
-      return;
-    }
-
-    // Saat migrasi, setiap akun diberi password acak. Flag ini memastikan
-    // password itu diganti sebelum orang bisa memakai portal.
-      location.replace('update-password.html');
-      return;
-    }
-
-    // Sesi kadaluarsa → langsung putuskan, jangan biarkan token basi
-    // terkirim ke Apps Script.
-    client.auth.onAuthStateChange(function (event) {
-      if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-        if (event === 'TOKEN_REFRESHED') return;
-        location.replace('login.html');
+    try {
+      if (!configured() || !window.supabase) {
+        stopAndRedirect('login.html?err=konfigurasi');
+        return;
       }
-    });
+      client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-    window.RW26_SESSION = legacySession();
-    window.RW26_PROFILE = profile;
-    void token;
-    readyResolve(profile);
+      // getSession() async, jadi HARUS di-await. Tanpa await, sb.data selalu
+      // undefined dan setiap orang akan tendang balik ke login.html.
+      var sb = await client.auth.getSession();
+      if (sb.error || !sb.data || !sb.data.session) {
+        stopAndRedirect('login.html');
+        return;
+      }
+      var token = sb.data.session.access_token;
+      var email = sb.data.session.user.email;
+
+      var rows = await client.from('profiles').select('*').eq('id', sb.data.session.user.id).limit(1);
+      if (rows.error) {
+        stopAndRedirect('login.html?err=profil');
+        return;
+      }
+      if (!rows.data || !rows.data.length) {
+        stopAndRedirect('login.html?err=profil-kosong');
+        return;
+      }
+      profile = rows.data[0];
+      profile.email = email;
+
+      if (String(profile.status).toLowerCase() !== 'aktif') {
+        stopAndRedirect('login.html?err=nonaktif');
+        return;
+      }
+
+      // Saat migrasi, setiap akun diberi password acak. Flag ini memastikan
+      // password itu diganti sebelum orang bisa memakai portal.
+      if (profile.must_change_pw) {
+        stopAndRedirect('update-password.html');
+        return;
+      }
+
+      // Sesi kadaluarsa → langsung putuskan, jangan biarkan token basi
+      // terkirim ke Apps Script.
+      client.auth.onAuthStateChange(function (event) {
+        if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+          if (event === 'TOKEN_REFRESHED') return;
+          stopAndRedirect('login.html');
+        }
+      });
+
+      window.RW26_SESSION = legacySession();
+      window.RW26_PROFILE = profile;
+      void token;
+      readyResolve(profile);
+    } catch (e) {
+      // Jaringan putus, Supabase tidak menjawab, atau galat lain yang tidak
+      // terduga. Tanpa blok ini `ready` menggantung dan gejalanya persis
+      // seperti bug lama: portal terbuka, menu kosong, tidak ada pesan.
+      console.error('Gagal menyiapkan portal:', e);
+      stopAndRedirect('login.html?err=jaringan');
+    }
   }
 
   var api = {
