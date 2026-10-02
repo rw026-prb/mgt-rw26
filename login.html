@@ -142,11 +142,8 @@
       const r = await sb.auth.getSession();
       if (r.data && r.data.session) {
         const id = r.data.session.user.id;
-        const p = await sb.from('profiles').select('id,status,must_change_pw').eq('id',id).limit(1);
-        const profil = p.data && p.data[0];
         if (profil && String(profil.status).toLowerCase() === 'aktif') {
-          if (profil.must_change_pw) {
-            location.replace('update-password.html');
+          location.replace('index.html');
             return;
           }
           location.replace('index.html');

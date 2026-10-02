@@ -800,7 +800,6 @@ window.RW26 = (function () {
 
     // Saat migrasi, setiap akun diberi password acak. Flag ini memastikan
     // password itu diganti sebelum orang bisa memakai portal.
-    if (profile.must_change_pw) {
       location.replace('update-password.html');
       return;
     }
