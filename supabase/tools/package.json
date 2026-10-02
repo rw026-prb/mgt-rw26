@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node test-lib.mjs && node test-migrate.mjs && node test-privkey.mjs && node test-pantulan.mjs && node test-audit-password.mjs",
     "test:sql": "node validate-migrations.cjs",
-    "test:kas": "node test-ganti-password.mjs",
+    "test:kas": "node test-ganti-password.mjs && node test-login-id.mjs",
     "test:rahasia": "node cek-rahasia.mjs",
     "test:privkey": "node test-privkey.mjs",
     "audit:gitignore": "node audit-gitignore.mjs",

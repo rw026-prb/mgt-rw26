@@ -172,17 +172,30 @@
       button.querySelector('.button-label').classList.add('d-none');
       button.querySelector('.spinner-border').classList.remove('d-none');
       try{
-        // Supabase Auth memakai EMAIL, bukan User ID.
+        // Supabase Auth hanya menerima EMAIL. Kalau yang diketik User ID
+        // ("RW-0007"), cari email-nya dulu lewat RPC, karena RLS menutup
+        // tabel profiles untuk peran anon.
         //
-        // Dulu form ini menerima keduanya, jadi banyak yang masih mengetik
-        // "RW-0000". Beri petunjuk yang jelas, bukan sekadar "gagal".
-        if(/^RW-\d+$/i.test(identifier)){
-          throw new Error(
-            'Masukkan EMAIL, bukan User ID. ID pengguna sudah tidak dipakai untuk login. '+
-            'Email tiap akun ada di berkas kredensial hasil migrasi.'
-          );
+        // Catatan: pesan error sengaja dibuat sama untuk "ID tidak ada"
+        // dan "password salah", supaya form ini tidak bisa dipakai
+        // menebak email mana yang terdaftar.
+        let email=identifier;
+        if(!/^[^\s@]+@[^\s@]+$/.test(identifier)){
+          const {data:emailDariId,error:errCari}=await sb.rpc('cari_email_login',{p_identifier:identifier});
+          if(errCari){
+            // PGRST202 = PostgREST tidak menemukan fungsi. Almost always
+            // berarti migrasi 0008 belum dijalankan di SQL Editor.
+            console.error('cari_email_login gagal:',errCari);
+            throw new Error(
+              errCari.code==='PGRST202'
+                ? 'Login pakai User ID belum aktif di server. Silakan pakai EMAIL, atau hubungi Super Admin.'
+                : 'Gagal memeriksa User ID. Coba lagi sebentar.'
+            );
+          }
+          if(!emailDariId) throw new Error('Email atau password salah.');
+          email=emailDariId;
         }
-        const {error}=await sb.auth.signInWithPassword({email:identifier,password});
+        const {error}=await sb.auth.signInWithPassword({email,password});
         if(error) throw new Error(
           /invalid login credentials/i.test(error.message)
             ? 'Email atau password salah.'
