@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Alat migrasi dan pengujian Portal RW 026 (Google Sheets -> Supabase)",
   "scripts": {
-    "test": "node test-lib.mjs && node test-migrate.mjs && node test-privkey.mjs && node test-pantulan.mjs && node test-audit-password.mjs && node test-pantulan-lambat.mjs",
+    "test": "node test-lib.mjs && node test-migrate.mjs && node test-privkey.mjs && node test-pantulan.mjs && node test-audit-password.mjs",
     "test:sql": "node validate-migrations.cjs",
     "test:kas": "node test-ganti-password.mjs",
     "test:rahasia": "node cek-rahasia.mjs",
@@ -28,8 +28,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "jsdom": "^30.1.1"
   }
 }

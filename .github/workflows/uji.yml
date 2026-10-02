@@ -92,20 +92,18 @@ jobs:
       - name: Uji alur keluar-masuk (anti pantulan)
         # Portal yang mengeluarkan pengguna tapi tidak menghapus sesi akan
         # membuat halaman login mengarahkan balik, dan orang yang sama
-        # terlempar bolak-balik tanpa henti. Diuji dengan memuat skrip
-        # login.html yang sungguhan ke dalam JSDOM.
+        # terlempar bolak-balik tanpa henti.
+        #
+        # Pengujiannya mengambil fungsi penjaga dari login.html lalu
+        # mengujinya di seluruh rentang waktu. Tidak memakai DOM dan tidak
+        # menunggu waktu, jadi hasilnya sama di komputer mana pun - termasuk
+        # runner CI yang lambat.
         run: node test-pantulan.mjs
 
       - name: Uji aturan pemeriksa kata sandi
         # Kalau aturan ini terlalu longgar, setiap push akan gagal palsu.
         # Kalau terlalu ketat, kebocoran bisa lolos. Dua-duanya diuji.
         run: node test-audit-password.mjs
-
-      - name: Uji keamanan pantulan pada environment lambat
-        # Runner CI bisa jauh lebih lambat daripada komputer lokal. Pengujian
-        # yang menunggu waktu tetap akan gagal di sana. Tes ini memaksa
-        # environment 20 kali lambat untuk membuktikan waktu tunggunya cukup.
-        run: node test-pantulan-lambat.mjs
 
       - name: Uji seluruh file SQL di PostgreSQL sungguhan
         run: node validate-migrations.cjs

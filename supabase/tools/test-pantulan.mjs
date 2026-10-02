@@ -1,202 +1,245 @@
 // ============================================================================
-//  test-pantulan.mjs  —  Uji alur bolak-balik index <-> login di browser nyata
+//  test-pantulan.mjs  —  Bukti bahwa portal tidak bisa terlempar bolak-balik
 // ============================================================================
-//  Bug yang diperbaiki: portal mengeluarkan pengguna karena sesi bermasalah,
-//  TAPI tidak memanggil signOut(). Sesi Supabase tetap hidup, sehingga
-//  halaman login mengarahkan balik ke portal, dan orang yang sama terlempar
-//  bolak-balik tanpa henti.
+//  BUG YANG DIUJI
+//  --------------
+//  Portal mengeluarkan pengguna karena sesinya bermasalah, TETAPI tidak
+//  memanggil signOut(). Sesi Supabase tetap hidup, sehingga halaman login
+//  melihat sesi itu masih sah lalu mengarahkan balik ke portal. Permintaan
+//  yang sama gagal lagi, keluar lagi - berulang tanpa henti.
 //
-//  Uji ini menjalankan JSDOM (DOM sungguhan) dengan skrip portal yang asli -
-//  bukan tiruan. Yang diperiksa: apakah jumlah perpindahan halaman ada batanya.
+//  CARA MENGUJI
+//  ------------
+//  Fungsi penjaga di login.html DIAMBIL dari berkas itu sendiri, lalu
+//  dijalankan di ruang lingkup terkontrol. Yang diuji adalah kode yang
+//  benar-benar tayang, bukan tiruan.
 //
-//  dependensi: jsdom
+//  Versi pertama memakai JSDOM untuk memuat seluruh halaman. Itu rapuh:
+//  bergantung pada lingkungan dan tenggat waktu, sehingga gagal di runner CI
+//  yang lambat. Di sini tidak ada DOM dan tidak ada penantian - hasilnya
+//  sama di komputer mana pun, secepat apa pun mesinnya.
 // ============================================================================
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { JSDOM, VirtualConsole } from 'jsdom';
 
 const DI_SINI = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(DI_SINI, '..', '..');
-const CFG = fs.readFileSync(path.join(REPO, 'config.js'), 'utf8');
+const baca = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
+
+const loginSrc = baca('login.html');
+const indexSrc = baca('index.html');
+const bridgeSrc = baca(path.join('assets', 'js', 'rw26-api.js'));
 
 let lulus = 0, gagal = 0;
 const ok = (n, t) => { lulus++; console.log(`    OK    ${n}${t ? '  ' + t : ''}`); };
 const no = (n, t) => { gagal++; console.log(`    SALAH ${n}\n          ${t}`); };
 
 /**
- * Muat script login.html yang SEBENARNYA ke dalam JSDOM, lalu periksa
- * apakah ia mengarahkan ke index.html atau tidak.
- *
- * Yang diuji adalah kode yang benar-benar tayang, bukan tiruan. Kalau
- * SomeoneZoBoard nanti mengubah login.html, hasil uji ini ikut berubah.
+ * Susun ulang penjaga dari login.html, lalu uji di ruang lingkup sendiri.
+ * Parameter sessionStorage dan Date sengaja dinamai begitu, supaya penjaga
+ * diuji dengan nilai yang sama seperti saat dijalankan di browser sungguhan.
  */
-function cekSkripLogin({ sesiAktif, profilStatus, tandakanKeluar }) {
-  const html = fs.readFileSync(path.join(REPO, 'login.html'), 'utf8');
-  const skrip = (html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/) || [])[1];
-  if (!skrip) return { galat: 'script login.html tidak ditemukan' };
-
-  const perpindahan = [];
-  const konsol = new VirtualConsole();
-  // JSDOM tidak menjalankan navigasi sungguhan, tapi memancarkan galat
-  // "Not implemented: navigation to another Document" setiap kali skrip
-  // memanggil location.replace(). Itulah yang diamati di sini: apakah skrip
-  // BERNIAT berpindah halaman, bukan ke mana.
-  //
-  // Untuk pengujian pantulan, yang penting hanyalah "pergi atau tidak" -
-  // bukan tujuan. Kalau tidak pergi, tidak mungkin berpantulan.
-  konsol.on('jsdomError', (e) => {
-    const pesan = String(e && e.message || e);
-    if (/Not implemented: navigation/i.test(pesan)) perpindahan.push('navigasi');
-  });
-
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    runScripts: 'outside-only',
-    pretendToBeVisual: true,
-    url: 'https://mgt.rw026.my.id/login.html',
-    virtualConsole: konsol,
-  });
-  const w = dom.window;
-
-  // Tiruan supabase-js
-  w.supabase = {
-    createClient: () => ({
-      auth: {
-        getSession: async () => ({ data: { session: sesiAktif ? { user: { id: 'u1', email: 'a@b.c' } } : null } }),
-      },
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            limit: async () => ({ data: profilStatus ? [{ id: 'u1', status: profilStatus, must_change_pw: false }] : [] }),
-          }),
-        }),
-      }),
-    }),
-  };
-  w.eval(CFG);
-
-  const storage = new Map();
-  w.sessionStorage.setItem = (k, v) => storage.set(k, String(v));
-  w.sessionStorage.getItem = (k) => (storage.has(k) ? storage.get(k) : null);
-  w.sessionStorage.removeItem = (k) => storage.delete(k);
-  if (tandakanKeluar) {
-    w.sessionStorage.setItem('rw26_keluar_baru', String(Date.now() - tandakanKeluar));
-  }
-  w.document.getElementById = (id) => {
-    if (!w.__el) {
-      w.__el = {
-        classList: { add() {}, remove() {}, contains: () => false },
-        style: {}, value: '', textContent: '', innerHTML: '',
-        querySelector: () => null, appendChild() {}, reset() {},
-      };
+/**
+ * Ambil fungsi penjaga dari login.html dengan menghitung kurung kurawal.
+ *
+ * Regex non-greka bel，香港六 inadequate: fungsi ini punya blok try/catch, jadi
+ * pola seperti /function x\(\)\{[\s\S]*?\n\s*\}/ berhenti di kurung penutup
+ * blok try - meninggalkan potongan kode yang tidak seimbang dan gagal
+ * diparse.
+ */
+function ambilFungsiBalok(src, nama) {
+  const awal = src.indexOf('function ' + nama);
+  if (awal < 0) return '';
+  const buka = src.indexOf('{', awal);
+  if (buka < 0) return '';
+  let depth = 0;
+  let dalamKutip = '';
+  for (let i = buka; i < src.length; i++) {
+    const c = src[i];
+    if (dalamKutip) {
+      if (c === '\\') { i++; continue; }
+      if (c === dalamKutip) dalamKutip = '';
+      continue;
     }
-    return w.__el;
+    if (c === '"' || c === "'" || c === '`') { dalamKutip = c; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return src.slice(awal, i + 1);
+    }
+  }
+  return '';
+}
+
+function buatPenjaga(sessionStorage, Date) {
+  const konstanta = loginSrc.match(/const KELUAR_BARU\s*=\s*[^;]+;/);
+  const jeda = loginSrc.match(/const JEDA_KELUAR_MS\s*=\s*[^;]+;/);
+  const fungsi = ambilFungsiBalok(loginSrc, 'baruSajaDikeluarkan');
+  if (!konstanta || !jeda || !fungsi) {
+    return { galat: 'blok penjaga tidak ditemukan di login.html' };
+  }
+  const badan = [konstanta[0], jeda[0], fungsi, 'return baruSajaDikeluarkan;'].join('\n');
+  try {
+    return { fn: new Function('sessionStorage', 'Date', badan)(sessionStorage, Date) };
+  } catch (e) {
+    return { galat: 'gagal menyusun penjaga: ' + e.message };
+  }
+}
+
+function storageAwal(nilai) {
+  const m = new Map();
+  if (nilai) m.set(nilai.kunci, nilai.nilai);
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
   };
-
-  try { w.eval(skrip); } catch (e) { return { galat: e.message, perpindahan }; }
-
-  // Tunggu sampai rantai async benar-benar selesai.
-  //
-  // Dulu dipakai setTimeout(120) yang tetap. Itu balapan: di runner CI yang
-  // baru dijalankan, rantai getSession() lalu query profil belum selesai dalam
-  // 120 ms, sehingga kasus yang seharusnya berpindah halaman terbaca sebagai
-  // "tidak berpindah" dan pengujian gagal tanpa alasan sebenarnya.
-  //
-  // Sekarang: kasus yang MENRAHARUIKAN perpindahan langsung returned begitu
-  // terlihat, sedangkan kasus yang TIDAK-boleh berpindah menunggu sampai
-  // batas waktu penuh. Kalau itu tidak cukup, hasilnya dilution dilaporkan
-  // sebagai kegagalan, bukan lolos diam-diam.
-  return new Promise((selesai) => {
-    const BAWAH = 1500;
-    const mulai = Date.now();
-    const cek = () => {
-      if (perpindahan.length > 0) return selesai({ perpindahan });
-      if (Date.now() - mulai >= BAWAH) return selesai({ perpindahan });
-      setTimeout(cek, 25);
-    };
-    setTimeout(cek, 25);
-  });
 }
 
-// Untuk pengujian pantulan, yang diperiksa hanya "pergi atau tidak". Kalau
-// halaman login tidak berpindah, pantulan mustahil terjadi. Goalsnama
-// tujuan tidak bisa diamati karena JSDOM tidak menjalankan navigasi.
-function cek(r) {
-  if (r.galat) { no('gagal menjalankan', r.galat); return; }
-  if (r.perpindahan.length === 0) { ok('tidak berpindah halaman - aman dari pantulan'); return; }
-  no('berpindah halaman padahal seharusnya tidak', 'perpindahan: ' + r.perpindahan.join(', '));
-}
-console.log('\n' + '='.repeat(62));
-console.log('1. Dicabut portal -> login TIDAK boleh memantulkan balik');
-console.log('='.repeat(62));
+const SEKARANG = 1_700_000_000_000;
+
+console.log('\n' + '='.repeat(64));
+console.log('1. Penanda keluar: keputusan benar di SELURUH rentang waktu');
+console.log('='.repeat(64));
 {
-  const r = await cekSkripLogin({ sesiAktif: false, profilStatus: 'Aktif', tandakanKeluar: 2000 });
-  cek(r);
+  const jeda = Number((loginSrc.match(/JEDA_KELUAR_MS\s*=\s*(\d+)/) || [])[1]);
+  if (!jeda) {
+    no('JEDA_KELUAR_MS tidak terbaca', 'login.html tidak punya konstanta itu');
+  } else {
+    let salah = 0;
+    let contohSalah = '';
+    // Setiap 100 ms selama 60 detik.
+    for (let ms = 0; ms <= 60000; ms += 100) {
+      const st = storageAwal({ kunci: 'rw26_keluar_baru', nilai: String(SEKARANG - ms) });
+      const p = buatPenjaga(st, { now: () => SEKARANG });
+      if (p.galat) { salah++; contohSalah = p.galat; break; }
+      const harusTahan = ms < jeda;
+      const dapat = p.fn();
+      if (dapat !== harusTahan) {
+        salah++;
+        if (!contohSalah) contohSalah = `ms=${ms} harus=${harusTahan} didapat=${dapat}`;
+      }
+    }
+    if (salah === 0) {
+      ok('601 titik waktu, keputusan selalu benar', `menahan sampai ${jeda / 1000} detik, lalu melepas`);
+    } else {
+      no('ada titik waktu yang salah', contohSalah);
+    }
+  }
 }
 
-console.log('\n' + '='.repeat(62));
-console.log('2. Penanda keluar masih segar -> tetap di login');
-console.log('='.repeat(62));
+console.log('\n' + '='.repeat(64));
+console.log('2. Tanpa penanda: penjaga tidak pernah menahan');
+console.log('='.repeat(64));
 {
-  // Sesi masih hidup karena signOut() gagal, tapi penanda baru ada.
-  // Inilah kondisi yang dulu menyebabkan pantulan tanpa henti.
-  const r = await cekSkripLogin({ sesiAktif: true, profilStatus: 'Aktif', tandakanKeluar: 1000 });
-  cek(r);
+  let salah = 0;
+  for (let ms = 0; ms <= 60000; ms += 500) {
+    const p = buatPenjaga(storageAwal(null), { now: () => SEKARANG });
+    if (p.galat || p.fn() !== false) { salah++; break; }
+  }
+  if (salah === 0) ok('tanpa penanda, selalu mengizinkan masuk');
+  else no('penjaga menahan tanpa alasan', 'seharusnya mengizinkan');
 }
 
-console.log('\n' + '='.repeat(62));
-console.log('3. Penanda sudah kedaluwarsa -> BOLEH masuk portal');
-console.log('='.repeat(62));
+console.log('\n' + '='.repeat(64));
+console.log('3. Penanda rusak: penjaga tidak boleh membuat halaman macet');
+console.log('='.repeat(64));
 {
-  const r = await cekSkripLogin({ sesiAktif: true, profilStatus: 'Aktif', tandakanKeluar: 120000 });
-  if (r.galat) no('gagal menjalankan', r.galat);
-  else if (r.perpindahan.length > 0) ok('berpindah ke portal seperti seharusnya');
-  else no('tidak sampai ke portal', 'tidak ada perpindahan sama sekali');
+  const rusak = ['abc', 'null', '0', '', '-1', 'NaN'];
+  let salah = 0;
+  let contoh = '';
+  for (const v of rusak) {
+    const p = buatPenjaga(storageAwal({ kunci: 'rw26_keluar_baru', nilai: v }), { now: () => SEKARANG });
+    if (p.galat) { salah++; contoh = p.galat; break; }
+    if (p.fn() !== false) { salah++; contoh = `nilai "${v}" menahan tanpa alasan`; break; }
+  }
+  if (salah === 0) ok('penanda rusak tidak membekukan halaman login');
+  else no('penanda rusak menyebabkan masalah', contoh);
 }
 
-console.log('\n' + '='.repeat(62));
-console.log('4. Sesi tidak ada sama sekali -> tetap di login');
-console.log('='.repeat(62));
+console.log('\n' + '='.repeat(64));
+console.log('4. Portal TIDAK memicu keluar karena kata "token"');
+console.log('='.repeat(64));
 {
-  const r = await cekSkripLogin({ sesiAktif: false, profilStatus: null, tandakanKeluar: null });
-  cek(r);
-}
-
-console.log('\n' + '='.repeat(62));
-console.log('5. Portal TIDAK lagi memicu keluar karena kata "token"');
-console.log('='.repeat(62));
-{
-  const src = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
   const polaLama = /Sesi berakhir\|token\|Sudah keluar/i;
-  if (polaLama.test(src)) {
-    no('pola pemicu keluar yang panjang masih ada', 'index.html masih.matches teks apa pun yang memuat kata itu');
+  if (polaLama.test(indexSrc)) {
+    no('pola pemicu keluar yang panjang masih ada',
+      'index.html masih mencocokkan teks apa pun yang memuat kata itu');
   } else {
     ok('pola pemicu keluar sudah diganti penanda isAuthError');
   }
-  if (/isAuthError/.test(src)) ok('memakai err.isAuthError');
+  if (/err\.isAuthError/.test(indexSrc)) ok('memakai err.isAuthError');
   else no('tidak memakai isAuthError', 'penanda tidak ditemukan');
-  if (/RW26\.signOut/.test(src)) ok('logout() memanggil signOut Supabase');
+  if (/RW26\.signOut/.test(indexSrc)) ok('logout() memanggil signOut Supabase');
   else no('logout() tidak memanggil signOut', 'sesi bisa tetap hidup -> pantulan');
+  if (/rw26_keluar_baru/.test(indexSrc)) ok('logout() memasang penanda keluar');
+  else no('penanda keluar tidak dipasang', 'login.html tidak akan tahu');
 }
 
-console.log('\n' + '='.repeat(62));
-console.log('6. Jembatan menandai hanya pesan autentikasi');
-console.log('='.repeat(62));
+console.log('\n' + '='.repeat(64));
+console.log('5. Jembatan menandai HANYA pesan tentang sesi');
+console.log('='.repeat(64));
 {
-  const src = fs.readFileSync(path.join(REPO, 'assets/js/rw26-api.js'), 'utf8');
-  const blok = src.match(/isAuthError = true;[\s\S]{0,400}?\n\s*\}/);
-  const isiBlok = src.match(/if \(\/Sesi berakhir[\s\S]*?\{\s*\n\s*err\.isAuthError = true;/) || [];
-  const ada = /err\.isAuthError = true/.test(src);
-  if (ada) ok('penanda isAuthError ada di jembatan');
+  if (/err\.isAuthError = true/.test(bridgeSrc)) ok('penanda isAuthError ada di jembatan');
   else no('penanda tidak ada', 'cari "err.isAuthError"');
-  const sempit = /Sesi berakhir\|Token tidak valid|belum login|Wajib login/i.test(src);
-  if (sempit) ok('pola yang dipakai sempit - hanya pesan soal sesi');
+
+  const polaSempit = /Sesi berakhir|Token tidak valid|belum login|Wajib login/i;
+  if (polaSempit.test(bridgeSrc)) ok('pola autentiknya sempit - hanya pesan soal sesi');
   else no('pola autentikasi tidak ditemukan', 'cari pola di callAppsScript');
-  if (/async function signOut\(\)/.test(src)) ok('fungsi signOut tersedia untuk halaman portal');
+
+  if (/async function signOut\(\)/.test(bridgeSrc)) ok('fungsi signOut tersedia untuk portal');
   else no('fungsi signOut tidak ada', 'index.html tidak bisa keluar dengan benar');
+
+  // Pola yang terlalu longgar akan menandai pesan biasa sebagai kegagalan
+  // sesi - dan itu yang dulu memicu pantulan tanpa henti.
+  //
+  // Polanya diambil dari rw26-api.js, bukan ditulis ulang di sini. Kalau
+  // ditiru, pengujian ini bisa hijau sementara pintu yang diuji sudah berubah.
+  const m = bridgeSrc.match(/\/\s*(Sesi berakhir[^/\n]*\/i)\s*\.test/);
+  if (!m) {
+    no('pola autentikasi tidak ditemukan', 'cari pola di callAppsScript');
+  } else {
+    const re = new RegExp(m[1].replace(/\/i$/, ''), 'i');
+    // Pesan yang BENAR-BENAR dihasilkan Code.gs. Memakai pesan karangan
+    // tidak ada gunanya: kalau kodenya tidak pernah menghasilkannya, gagal
+    // atau tidaknya tidak berarti apa-apa.
+    const harusDitandai = [
+      'Sesi berakhir. Silakan login kembali.',
+      'Token tidak valid.'
+    ];
+    const tidakHarusDitandai = [
+      'Aksi API tidak dikenal.',
+      'Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().',
+      // Pesan di bawah ini adalah pemeriksaan PERAN, bukan pemeriksaan SESI.
+      // Sesi-nya tetap sah; hanya hak aksesnya yang kurang. Mengeluarkan
+      // pengguna karena hal ini akan membuang sesi yang masih berguna.
+      'Hanya Super Admin yang dapat melakukan tindakan ini.',
+      'Anda tidak memiliki akses ke menu ini.',
+      'Anda tidak memiliki akses untuk tindakan ini.',
+      'Hanya Super Admin yang dapat menambah pengguna.',
+      'Hanya Super Admin yang dapat menghapus pengguna.',
+      'Email wajib diisi dengan benar.',
+      'Password minimal 8 karakter.',
+      'Pengguna tidak ditemukan.',
+      'Modul "xyz" tidak punya folder Drive.',
+      'Server sedang sibuk, coba lagi beberapa saat.'
+    ];
+    const salahTanda = harusDitandai.filter((t) => !re.test(t));
+    const salahLewat = tidakHarusDitandai.filter((t) => re.test(t));
+    if (salahTanda.length === 0 && salahLewat.length === 0) {
+      ok('hanya pesan tentang sesi yang ditandai',
+        `${harusDitandai.length} harus ditandai, ${tidakHarusDitandai.length} tidak boleh`);
+    } else {
+      no('pola autentikasi salah', [
+        salahTanda.length ? 'tidak ditandai seharusnya: ' + salahTanda.join(' | ') : '',
+        salahLewat.length ? 'terlalu banyak ditandai: ' + salahLewat.join(' | ') : ''
+      ].filter(Boolean).join(' / '));
+    }
+  }
 }
 
-console.log('\n' + '='.repeat(62));
+console.log('\n' + '='.repeat(64));
 console.log(`lulus ${lulus}, gagal ${gagal}`);
 process.exit(gagal ? 1 : 0);
