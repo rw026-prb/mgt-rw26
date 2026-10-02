@@ -6,11 +6,20 @@
 // di berkas workflow.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const roots = [
-  'D:/Website RW/Mgt-portal RW',
-  'D:/Website RW/Website-RW26',
-];
+// Path dihitung relatif ke file ini, bukan ditulis mati. Kalau ditulis mati
+// dengan "D:/...", skrip ini hanya jalan di komputer itu saja - tidak akan
+// jalan di GitHub Actions, yang memakai Linux.
+const DI_SINI = path.dirname(fileURLToPath(import.meta.url));
+
+// Default: repo tempat skrip ini berada. Tambahan path bisa diberikan sebagai
+// argumen, tapi di CI hanya repo itu yang ada - jadi jangan bergantung pada
+// repo lain yang mungkin tidak terunduh.
+const roots = process.argv.length > 2
+  ? process.argv.slice(2)
+  : [path.resolve(DI_SINI, '..', '..')];
+
 const lewati = new Set(['node_modules', '.git', 'pgdata', 'out', '.github']);
 const lewatiFile = new Set(['cek-rahasia.mjs']);
 
@@ -56,6 +65,13 @@ let bocor = 0;
 let diperiksa = 0;
 
 function telusuri(dir) {
+  // Path yang tidak ada harus diabaikan, bukan membuat skrip berhenti. Di CI
+  // hanya satu repo yang terunduh, jadi path repo lain yang disebut sebagai
+  // argumen tidak akan ada.
+  if (!fs.existsSync(dir)) {
+    console.log('  dilewati (tidak ada): ' + dir);
+    return;
+  }
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {
       if (lewati.has(e.name)) continue;
