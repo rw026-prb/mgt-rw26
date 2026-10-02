@@ -101,6 +101,12 @@ jobs:
         # Kalau terlalu ketat, kebocoran bisa lolos. Dua-duanya diuji.
         run: node test-audit-password.mjs
 
+      - name: Uji keamanan pantulan pada environment lambat
+        # Runner CI bisa jauh lebih lambat daripada komputer lokal. Pengujian
+        # yang menunggu waktu tetap akan gagal di sana. Tes ini memaksa
+        # environment 20 kali lambat untuk membuktikan waktu tunggunya cukup.
+        run: node test-pantulan-lambat.mjs
+
       - name: Uji seluruh file SQL di PostgreSQL sungguhan
         run: node validate-migrations.cjs
 

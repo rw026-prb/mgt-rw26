@@ -95,9 +95,27 @@ function cekSkripLogin({ sesiAktif, profilStatus, tandakanKeluar }) {
   };
 
   try { w.eval(skrip); } catch (e) { return { galat: e.message, perpindahan }; }
+
+  // Tunggu sampai rantai async benar-benar selesai.
+  //
+  // Dulu dipakai setTimeout(120) yang tetap. Itu balapan: di runner CI yang
+  // baru dijalankan, rantai getSession() lalu query profil belum selesai dalam
+  // 120 ms, sehingga kasus yang seharusnya berpindah halaman terbaca sebagai
+  // "tidak berpindah" dan pengujian gagal tanpa alasan sebenarnya.
+  //
+  // Sekarang: kasus yang MENRAHARUIKAN perpindahan langsung returned begitu
+  // terlihat, sedangkan kasus yang TIDAK-boleh berpindah menunggu sampai
+  // batas waktu penuh. Kalau itu tidak cukup, hasilnya dilution dilaporkan
+  // sebagai kegagalan, bukan lolos diam-diam.
   return new Promise((selesai) => {
-    // Beri waktu skrip async menyelesaikan getSession() dan query profil.
-    setTimeout(() => selesai({ perpindahan }), 120);
+    const BAWAH = 1500;
+    const mulai = Date.now();
+    const cek = () => {
+      if (perpindahan.length > 0) return selesai({ perpindahan });
+      if (Date.now() - mulai >= BAWAH) return selesai({ perpindahan });
+      setTimeout(cek, 25);
+    };
+    setTimeout(cek, 25);
   });
 }
 
@@ -109,7 +127,6 @@ function cek(r) {
   if (r.perpindahan.length === 0) { ok('tidak berpindah halaman - aman dari pantulan'); return; }
   no('berpindah halaman padahal seharusnya tidak', 'perpindahan: ' + r.perpindahan.join(', '));
 }
-
 console.log('\n' + '='.repeat(62));
 console.log('1. Dicabut portal -> login TIDAK boleh memantulkan balik');
 console.log('='.repeat(62));
