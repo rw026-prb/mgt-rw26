@@ -1,0 +1,25 @@
+{
+  "name": "rw026-supabase-tools",
+  "private": true,
+  "type": "module",
+  "description": "Alat migrasi dan pengujian Portal RW 026 (Google Sheets -> Supabase)",
+  "scripts": {
+    "test": "node test-lib.mjs && node test-migrate.mjs",
+    "test:sql": "node validate-migrations.cjs",
+    "smoke": "node smoke.mjs",
+    "migrate:dry": "node migrate.mjs --dry-run",
+    "split": "node split-codegs.mjs",
+    "split:apply": "node split-codegs.mjs --apply"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "embedded-postgres": "^17.5.0-beta.15",
+    "pg": "^8.16.3"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64": true
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

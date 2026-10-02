@@ -1,0 +1,393 @@
+﻿The files belonging to this database system will be owned by user "Asus".
+This user must also own the server process.
+
+
+The database cluster will be initialized with this locale configuration:
+  locale provider:   libc
+  LC_COLLATE:  Indonesian_Indonesia.1252
+  LC_CTYPE:    Indonesian_Indonesia.1252
+  LC_MESSAGES: en_US.UTF-8
+  LC_MONETARY: Indonesian_Indonesia.1252
+  LC_NUMERIC:  Indonesian_Indonesia.1252
+  LC_TIME:     Indonesian_Indonesia.1252
+
+The default database encoding has accordingly been set to "WIN1252".
+The default text search configuration will be set to "indonesian".
+
+Data page checksums are disabled.
+
+
+creating directory D:/Website RW/Mgt-portal RW/supabase/tools/pgdata ... 
+ok
+
+creating subdirectories ... 
+ok
+
+selecting dynamic shared memory implementation ... windows
+selecting default "max_connections" ... 
+100
+selecting default "shared_buffers" ... 
+128MB
+selecting default time zone ... 
+Asia/Bangkok
+creating configuration files ... 
+ok
+running bootstrap script ... 
+ok
+
+performing post-bootstrap initialization ... 
+ok
+syncing data to disk ... 
+ok
+
+Success. You can now start the database server using:
+
+    ^"D^:^\Website^ RW^\Mgt^-portal^ RW^\supabase^\tools^\node^_modules^\^@embedded^-postgres^\windows^-x64^\native^\bin^\pg^_ctl^" -D ^"D^:^\Website^ RW^\Mgt^-portal^ RW^\supabase^\tools^\pgdata^" -l logfile start
+
+
+2026-10-02 08:45:13.496 +07 [1996] LOG:  starting PostgreSQL 17.5 on x86_64-windows, compiled by msvc-19.43.34808, 64-bit
+
+2026-10-02 08:45:13.505 +07 [1996] LOG:  listening on IPv6 address "::1", port 55432
+
+2026-10-02 08:45:13.505 +07 [1996] LOG:  listening on IPv4 address "127.0.0.1", port 55432
+
+2026-10-02 08:45:13.583 +07 [20484] LOG:  database system was shut down at 2026-10-02 08:45:12 +07
+
+2026-10-02 08:45:13.626 +07 [1996] LOG:  database system is ready to accept connections
+
+mock auth.* + peran anon/authenticated siap
+
+OK    0001_schema.sql
+OK    0002_rls.sql
+OK    0002b_lockdown.sql
+OK    0003_functions.sql
+OK    0004_migration_audit.sql
+OK    0005_bridge_grants.sql
+
+=== kas_report(7, 2026)  -> harus AGUSTUS ===
+{
+  "hasil": {
+    "ok": true,
+    "saldoAwal": 500000,
+    "updatedAt": "2026-10-02T08:45:13.904427+07:00",
+    "saldoAkhir": 1700000,
+    "totalMasuk": 1350000,
+    "totalKeluar": 150000,
+    "rincianMasuk": [
+      {
+        "uraian": "Iuran Agustus 2026",
+        "nominal": 600000,
+        "tanggal": "02/08/2026"
+      },
+      {
+        "uraian": "Bantuan warna-warni",
+        "nominal": 750000,
+        "tanggal": "15/08/2026"
+      }
+    ],
+    "rincianKeluar": [
+      {
+        "uraian": "Bayar listrik",
+        "nominal": 150000,
+        "tanggal": "10/08/2026"
+      }
+    ]
+  }
+}
+
+=== kas_cash_flow(6..7, 2026) -> Juli s.d. Agustus ===
+{
+  "hasil": {
+    "ok": true,
+    "data": [
+      {
+        "label": "Jul 2026",
+        "masuk": 500000,
+        "saldo": 500000,
+        "keluar": 0
+      },
+      {
+        "label": "Agu 2026",
+        "masuk": 1350000,
+        "saldo": 1700000,
+        "keluar": 150000
+      }
+    ]
+  }
+}
+
+=== get_public_content() -> bentuk JSON ===
+{
+  "hasil": {
+    "ok": true,
+    "himbauan": [
+      {
+        "id": "HIM-001",
+        "judul": "Slide aktif",
+        "fileId": "",
+        "gambar": "",
+        "status": "Aktif",
+        "driveUrl": "",
+        "imageUrl": "",
+        "kategori": "Informasi"
+      }
+    ],
+    "statistik": [
+      {
+        "id": "STT-001",
+        "nama": "Total Warga",
+        "nilai": 1175,
+        "updatedAt": "2026-10-02T08:45:13.920103+07:00",
+        "keterangan": ""
+      }
+    ],
+    "facilities": [
+      {
+        "id": "FAS-001",
+        "foto": "",
+        "maps": "",
+        "nama": "Balai RW",
+        "fileId": "",
+        "imageUrl": "",
+        "deskripsi": ""
+      }
+    ],
+    "organization": {
+      "rw": [
+        {
+          "id": "ORG-001",
+          "foto": "",
+          "nama": "Bapak Sutrisno",
+          "group": "rw",
+          "fileId": "",
+          "jabatan": "Ketua",
+          "imageUrl": ""
+        }
+      ],
+      "pkk": [],
+      "pokmas": [],
+      "posyandu": [],
+      "bank-sampah": []
+    },
+    "announcements": [
+      {
+        "id": "INF-001",
+        "judul": "Pengumuman test",
+        "status": "Aktif",
+        "tanggal": "01/08/2026",
+        "kategori": "Informasi",
+        "ringkasan": ""
+      }
+    ]
+  }
+}
+
+=== anon TIDAK boleh punya GRANT select di kas (harus=false) ===
+{
+  "anon_boleh_select_kas": false,
+  "anon_boleh_select_profiles": false,
+  "anon_boleh_catat": true,
+  "anon_boleh_baca_himbauan": true
+}
+
+=== RLS himbauan: anon hanya melihat status Aktif ===
+{
+  "anon_melihat": "1"
+}
+{
+  "admin_melihat": "2"
+}
+
+=== trigger id otomatis (himbauan tanpa id) ===
+{
+  "id": "HIM-001",
+  "judul": "Tanpa id"
+}
+2026-10-02 08:45:13.939 +07 [8460] ERROR:  Hanya Super Admin yang dapat melakukan tindakan ini.
+2026-10-02 08:45:13.939 +07 [8460] CONTEXT:  PL/pgSQL function visitor_stats() line 7 at RAISE
+2026-10-02 08:45:13.939 +07 [8460] STATEMENT:  select public.visitor_stats();
+
+2026-10-02 08:45:13.941 +07 [8460] WARNING:  there is no transaction in progress
+
+
+=== visitor_stats harus DITOLAK saat tidak login sebagai Super Admin ===
+  Hanya Super Admin yang dapat melakukan tindakan ini.
+2026-10-02 08:45:13.943 +07 [8460] ERROR:  Anda tidak memiliki akses ke menu ini.
+2026-10-02 08:45:13.943 +07 [8460] CONTEXT:  PL/pgSQL function list_kas(integer,integer,text,text) line 13 at RAISE
+2026-10-02 08:45:13.943 +07 [8460] STATEMENT:  select public.list_kas();
+
+2026-10-02 08:45:13.945 +07 [8460] WARNING:  there is no transaction in progress
+
+
+=== list_kas harus DITOLAK saat tidak login ===
+  Anda tidak memiliki akses ke menu ini.
+
+=== kas_cash_flow rentang terbalik -> array kosong ===
+{
+  "hasil": {
+    "ok": true,
+    "data": []
+  }
+}
+
+=== kas_cash_flow bulan tanpa transaksi tetap muncul (nilai 0) ===
+{
+  "hasil": {
+    "ok": true,
+    "data": [
+      {
+        "label": "Apr 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Mei 2026",
+        "masuk": 100000,
+        "saldo": 100000,
+        "keluar": 0
+      },
+      {
+        "label": "Jun 2026",
+        "masuk": 0,
+        "saldo": 100000,
+        "keluar": 0
+      },
+      {
+        "label": "Jul 2026",
+        "masuk": 0,
+        "saldo": 100000,
+        "keluar": 0
+      }
+    ]
+  }
+}
+
+=== kas_cash_flow 6 bulan termasuk bulan kosong ===
+{
+  "hasil": {
+    "ok": true,
+    "data": [
+      {
+        "label": "Jan 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Feb 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Mar 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Apr 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Mei 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      },
+      {
+        "label": "Jun 2026",
+        "masuk": 0,
+        "saldo": 0,
+        "keluar": 0
+      }
+    ]
+  }
+}
+
+=== update_month_index: kas_report(0,2026)=Januari vs kas_report(6,2026)=Juli ===
+{
+  "januari": [
+    {
+      "uraian": "Januari",
+      "nominal": 111,
+      "tanggal": "05/01/2026"
+    }
+  ],
+  "juli": [
+    {
+      "uraian": "Juli",
+      "nominal": 777,
+      "tanggal": "05/07/2026"
+    }
+  ]
+}
+
+=== himbauan tanpa id -> trigger mengisi HIM-002 ===
+{
+  "id": "HIM-001",
+  "judul": "A"
+}
+{
+  "id": "HIM-002",
+  "judul": "Tanpa id"
+}
+2026-10-02 08:45:13.958 +07 [8460] ERROR:  new row for relation "kas" violates check constraint "kas_nilai_ada"
+2026-10-02 08:45:13.958 +07 [8460] DETAIL:  Failing row contains (5503e11e-4cbc-448e-b87d-b9636a2ce026, null, 2026-10-02, Nol, null, Tunai, 0, 0, null, null, null, Menunggu, null, X, null, null, null, 2026-10-02 08:45:13.957384+07, 2026-10-02 08:45:13.957384+07).
+2026-10-02 08:45:13.958 +07 [8460] STATEMENT:  insert into public.kas (tanggal, uraian, masuk, keluar, status, created_by_name)
+	              values (current_date, 'Nol', 0, 0, 'Menunggu', 'X');
+
+2026-10-02 08:45:13.959 +07 [8460] WARNING:  there is no transaction in progress
+
+
+=== kas masuk=0 keluar=0 harus DITOLAK (CHECK constraint) ===
+  new row for relation "kas" violates check constraint "kas_nilai_ada"
+2026-10-02 08:45:13.960 +07 [8460] ERROR:  new row for relation "kas" violates check constraint "kas_metode_check"
+2026-10-02 08:45:13.960 +07 [8460] DETAIL:  Failing row contains (9edc75ca-5c24-4091-9c32-bbfe56bcdf6b, null, 2026-10-02, Uji, null, Transfer Bank, 1000, 0, null, null, null, Menunggu, null, X, null, null, null, 2026-10-02 08:45:13.96037+07, 2026-10-02 08:45:13.96037+07).
+2026-10-02 08:45:13.960 +07 [8460] STATEMENT:  insert into public.kas (tanggal, uraian, masuk, metode, status, created_by_name)
+	              values (current_date, 'Uji', 1000, 'Transfer Bank', 'Menunggu', 'X');
+
+2026-10-02 08:45:13.961 +07 [8460] WARNING:  there is no transaction in progress
+
+
+=== kas metode tidak valid harus DITOLAK ===
+  new row for relation "kas" violates check constraint "kas_metode_check"
+2026-10-02 08:45:13.963 +07 [8460] ERROR:  duplicate key value violates unique constraint "organisasi_grup_legacy_id_key"
+2026-10-02 08:45:13.963 +07 [8460] DETAIL:  Key (grup, legacy_id)=(rw, ORG-001) already exists.
+2026-10-02 08:45:13.963 +07 [8460] STATEMENT:  begin;
+	              insert into public.organisasi (grup, legacy_id, jabatan, nama) values ('rw','ORG-001','A','A');
+	              insert into public.organisasi (grup, legacy_id, jabatan, nama) values ('rw','ORG-001','B','B');
+	              rollback;
+
+
+=== organisasi: grup + legacy_id harus unik ===
+  duplicate key value violates unique constraint "organisasi_grup_legacy_id_key"
+
+=== organisasi: ORG-001 boleh sama di grup berbeda ===
+{
+  "grup": "pkk",
+  "legacy_id": "ORG-001",
+  "nama": "B"
+}
+{
+  "grup": "rw",
+  "legacy_id": "ORG-001",
+  "nama": "A"
+}
+
+=== auth.users membuat otomatis baris profiles + legacy_id RW-0001 ===
+{
+  "legacy_id": "RW-0001",
+  "nama": "Budi Santoso",
+  "role": "Editor",
+  "status": "Aktif",
+  "must_change_pw": true
+}
+
+=== RLS profiles: authenticated tanpa login tidak boleh apa-apa ===
+{
+  "profiles_terlihat": "0"
+}

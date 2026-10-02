@@ -1,55 +1,102 @@
 # Portal Manajemen RW 26
 
-Portal administrasi responsif untuk RW 26 Pengasinan, Rawalumbu. Dibangun dengan Bootstrap 5 dan dapat langsung dibuka melalui `index.html`.
+Portal administrasi untuk RW 26 Pengasinan, Rawalumbu.
 
-## Fitur
+> **STATUS: sedang migrasi ke Supabase.**
+> Data sudah dipindahkan. `Code.gs` sudah ditipiskan. Portal admin
+> (`index.html`) dan portal warga (`Website-RW26`) belum diarahkan ke
+> Supabase - selama itu belum selesai, keduanya masih membaca dari Apps
+> Script seperti biasa.
 
-- Dashboard ringkasan data warga
-- Himbauan dan papan pengumuman
-- Berita dan informasi lingkungan
-- Data fasilitas umum
-- Struktur organisasi pengurus
-- Manajemen pengguna dan hak akses
-- Mode terang/gelap serta navigasi responsif
+## Arsitektur sekarang
+
+| Lapisan | Isi | Tempat |
+|---|---|---|
+| Data | Himbauan, pengumuman, fasum, organisasi, statistik, kas, user, log | **Supabase (PostgreSQL)** |
+| Media | Foto galeri, foto berita, foto modul lain | **Google Drive** (tetap) |
+| Media metadata | Album, `video`, `video_kegiatan`, `berita` | **Google Sheets** (tetap, hanya 4 tab) |
+| Galeri, video, berita | Diproses oleh | **Google Apps Script** (`Code.gs`, sudah tipis dari 2.042 jadi 996 baris) |
+| Foto modul Supabase | Diunggah lewat aksi `uploadDriveImage` | **Apps Script → Drive** |
+
+Yang **tidak lagi** ditangani `Code.gs`: autentikasi, sesi, pengguna, kas,
+statistik, organisasi, fasilitas, pengumuman, himbauan, log pengunjung, dan log
+aktivitas. Semuanya dipindah ke Supabase.
+
+Detail skema database ada di `supabase/migrations/`. Alat migrasi dan pengujian
+ada di `supabase/tools/` (lihat README-nya di sana).
 
 ## Menjalankan
 
-### 1. Siapkan backend Google Sheet
+### 1. Siapkan backend Apps Script
 
-1. Buka spreadsheet RW 26.
-2. Pilih **Extensions → Apps Script**.
-3. Salin isi `Code.gs` proyek ini ke editor Apps Script.
-4. Jalankan fungsi `setupAllSheets` satu kali dan izinkan akses. Fungsi ini membuat seluruh sheet yang dibutuhkan (user, himbauan, informasi, berita, fasum, organisasi, album, video, video_kegiatan, statistik_warga, visitor_log, activity_log) beserta header-nya.
-5. Jalankan `installWarmTrigger` satu kali. Fungsi ini memasang trigger yang mengisi cache setiap 10 menit agar pengunjung tidak pernah menunggu proses baca spreadsheet.
-6. Pilih **Deploy → New deployment → Web app**.
-7. Atur **Execute as: Me** dan **Who has access: Anyone**.
-8. Salin URL Web App hasil deployment.
-9. Tempel URL tersebut pada nilai `APPS_SCRIPT_URL` di `config.js`.
+1. Buka spreadsheet RW 26 → **Extensions → Apps Script**.
+2. Salin isi `Code.gs` proyek ini ke editor Apps Script (ganti seluruh isi).
+3. **Pasang kredensial Supabase** — jalankan fungsi `setupSupabaseConfig_` satu
+   kali dari editor, dengan ketiga nilai dari Supabase → Project Settings → API:
 
-> Setelah memperbarui `Code.gs`, jalankan `setupAllSheets` satu kali lagi setiap kali ada sheet baru yang ditambahkan. Pembacaan sudah tidak membuat sheet otomatis, sehingga salah konfigurasi langsung terlihat sebagai pesan error, bukan diam-diam.
+   ```javascript
+   setupSupabaseConfig_(
+     'https://xxxxxxxx.supabase.co',
+     'kunci-anon-public',
+     'kunci-service-role'
+   );
+   ```
 
-### 2b. Portal warga
+   Nilai disimpan di **Script Properties**, bukan di dalam `Code.gs` - file ini
+   ikut ter-*commit* ke repository publik, jadi tidak boleh memuat kredensial.
 
-Portal warga berada di repo terpisah dan memakai endpoint `publicKasCashFlow` untuk tab Arus Kas. Setelah `Code.gs` diperbarui, deploy ulang versi portal warga agar tidak lagi mengirim satu request per bulan.
+4. Jalankan `setupGallerySheet`, `setupVideoSheet`, dan `setupVideoKegiatanSheet`
+   satu kali (hanya perlu kalau tab-nya belum ada).
+5. Jalankan `installWarmTrigger` satu kali. Trigger ini mengisi cache tiap 10
+   menit agar pengunjung tidak menunggu pembacaan spreadsheet.
+6. **Deploy → New deployment → Web app**, dengan **Execute as: Me** dan
+   **Who has access: Anyone**.
+7. Salin URL Web App, tempel ke `APPS_SCRIPT_URL` di `config.js`.
+
+> **Rotasi URL.** `config.js` versi lama (yang masih ada di riwayat git)
+> memuat URL deployment yang sekarang sudah tidak dipakai. Buat **deployment
+> baru**, jangan memakai URL lama.
 
 ### 2. Jalankan portal
 
-Buka `login.html` melalui web server lokal/hosting. Login dapat menggunakan User ID atau email pada spreadsheet.
+Buka `login.html` lewat web server lokal atau hosting.
 
-Struktur kolom yang digunakan:
+> Login masih memakai alur `login` versi lama dan **akan berhenti bekerja** begitu
+> portal diarahkan ke Supabase Auth (Fase 6). Sampai saat itu, jangan
+> Montessori data baru lewat portal -$data baru masuk ke Sheets, bukan
+> PostgreSQL.
 
-`User ID | Nama Lengkap | Email | No HP | Role ID | Wilayah ID | Status | Password Hash | Login Terakhir | Tanggal Dibuat`
+## Aksi yang dilayani Apps Script
 
-Struktur tabel himbauan:
+| Modul | Aksi |
+|---|---|
+| Galeri Foto | `listGalleryAlbums`, `createGalleryAlbum`, `deleteGalleryAlbum`, `listGalleryPhotos`, `uploadGalleryPhoto`, `deleteGalleryPhoto` |
+| Berita | `listNews`, `createNews`, `updateNews`, `toggleNews`, `deleteNews` |
+| Video Sambutan | `listVideos`, `createVideo`, `updateVideo`, `toggleVideo`, `setVideoAutoplay`, `clearVideoAutoplay`, `deleteVideo` |
+| Video Kegiatan | `listVideoKegiatan`, `createVideoKegiatan`, `updateVideoKegiatan`, `toggleVideoKegiatan`, `deleteVideoKegiatan` |
+| Jembatan | `uploadDriveImage` |
 
-`ID | JUDUL | KATEGORI | GAMBAR | STATUS`
+Aksi baca publik: `publicContent` (kini hanya `news`, `gallery`, `videos`,
+`videoKegiatan`) dan `publicGalleryPhotos`.
 
-Gambar himbauan disimpan ke folder Drive yang dikonfigurasi di `HIMBAUAN_DRIVE_FOLDER_ID`, lalu kolom `GAMBAR` diisi formula hyperlink ke file tersebut.
+## Keamanan
 
-> Untuk akun pada spreadsheet lama, password teks biasa akan otomatis diganti menjadi hash SHA-256 setelah login pertama berhasil. Password baru disimpan sebagai PBKDF2.
+Web App dideploy dengan akses **Anyone**, jadi endpoint-nya bisa dipanggil siapa
+saja. Setiap aksi tulis memanggil `requireSupabaseUser_` +
+`requireMenuAccess_` lebih dulu. Aksi `uploadDriveImage` punya tiga lapis
+perlindungan: modul harus terdaftar di `DRIVE_FOLDER_BY_MODULE`, hak akses
+modul diperiksa, dan tipe MIME dibatasi.
+
+Kunci `service_role` memberi akses penuh ke database. Jangan pernah menaruhnya
+di `index.html`, `config.js`, atau `Code.gs`.
 
 ## Catatan performa
 
-- Halaman publik memakai satu cache `public_content` yang disusun ulang dari cache per-modul, sehingga pembacaan spreadsheet hanya terjadi saat cache kosong.
-- `warmCache` (dipicu tiap 10 menit) mengisi cache halaman publik, arus kas, dan laporan kas 3 bulan terakhir. Jalankan `warmCache` secara manual dari editor setelah pembaruan besar.
-- Saat cache sedang dihitung dan kunci sedang dipakai, pembacaan lain dilayani dari salinan last-known-good, bukan menghitung ulang. Ini mencegah lonjakan saat banyak pengunjung datang bersamaan.
+- `publicContent` dilayani dari cache `public_content` yang disusun dari cache
+  per-modul; pembacaan Sheets hanya terjadi saat cache kosong.
+- `warmCache` (tiap 10 menit) mengisi cache halaman publik dan album galeri.
+  Jalankan manual dari editor setelah pembaruan besar.
+- Saat cache sedang dihitung dan kunci sedang dipakai, pembacaan lain dilayani
+  dari salinan last-known-good. Mencegah lonjakan saat banyak pengunjung datang
+  bersamaan.
+- Laporan kas tidak lagi di-cache di sini - dihitung oleh PostgreSQL.
