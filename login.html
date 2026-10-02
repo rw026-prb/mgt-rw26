@@ -110,14 +110,45 @@
 
     // Sudah punya sesi? Langsung ke portal. Pemeriksaan dilakukan setelah
     // komponen siap, karena getSession() bersifat asynchronous.
+    //
+    // PENJAGA ANTI-PANTULAN
+    // ----------------------
+    // Kalau portal baru saja mengeluarkan pengguna karena sesinya bermasalah,
+    // halaman ini TIDAK boleh langsung mengarahkan balik. Kalau iya, pengguna
+    // terlempar bolak-balik antara index.html dan login.html tanpa henti -
+    // persis yang terjadi sebelum ada penjaga ini.
+    //
+    // Penanda 'rw26_keluar_baru' dipasang oleh portal sebelumshed Leaves.
+    const KELUAR_BARU='rw26_keluar_baru';
+    const JEDA_KELUAR_MS=15000;
+    function baruSajaDikeluarkan(){
+      try{
+        const t=Number(sessionStorage.getItem(KELUAR_BARU)||0);
+        if(t && (Date.now()-t) < JEDA_KELUAR_MS) return true;
+        sessionStorage.removeItem(KELUAR_BARU);
+        return false;
+      }catch(e){ return false; }
+    }
+
     (async () => {
       if (!sb) return;
+      if (baruSajaDikeluarkan()) {
+        // Beri tahu apa yang terjadi, jangan diam-diam arahkan lagi.
+        const el=document.getElementById('loginAlert');
+        el.textContent='Sesi sebelumnya berakhir. Silakan masuk kembali dengan password Anda.';
+        el.classList.remove('d-none');
+        return;
+      }
       const r = await sb.auth.getSession();
       if (r.data && r.data.session) {
         const id = r.data.session.user.id;
-        const p = await sb.from('profiles').select('id,status').eq('id',id).limit(1);
+        const p = await sb.from('profiles').select('id,status,must_change_pw').eq('id',id).limit(1);
         const profil = p.data && p.data[0];
         if (profil && String(profil.status).toLowerCase() === 'aktif') {
+          if (profil.must_change_pw) {
+            location.replace('update-password.html');
+            return;
+          }
           location.replace('index.html');
         }
       }

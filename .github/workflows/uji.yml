@@ -89,6 +89,18 @@ jobs:
         # tersangkut di halaman ganti password selamanya - tanpa pesan error.
         run: node test-ganti-password.mjs
 
+      - name: Uji alur keluar-masuk (anti pantulan)
+        # Portal yang mengeluarkan pengguna tapi tidak menghapus sesi akan
+        # membuat halaman login mengarahkan balik, dan orang yang sama
+        # terlempar bolak-balik tanpa henti. Diuji dengan memuat skrip
+        # login.html yang sungguhan ke dalam JSDOM.
+        run: node test-pantulan.mjs
+
+      - name: Uji aturan pemeriksa kata sandi
+        # Kalau aturan ini terlalu longgar, setiap push akan gagal palsu.
+        # Kalau terlalu ketat, kebocoran bisa lolos. Dua-duanya diuji.
+        run: node test-audit-password.mjs
+
       - name: Uji seluruh file SQL di PostgreSQL sungguhan
         run: node validate-migrations.cjs
 

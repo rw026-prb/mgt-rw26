@@ -689,8 +689,38 @@ window.RW26 = (function () {
     var data;
     try { data = JSON.parse(text); }
     catch (e) { throw new Error('Server sedang sibuk, coba lagi beberapa saat.'); }
-    if (!data.ok) throw new Error(data.message || 'Permintaan gagal.');
+    if (!data.ok) {
+      var err = new Error(data.message || 'Permintaan gagal.');
+      // Tandai HANYA untuk kegagalan yang benar-benar soal autentikasi.
+      //
+      // Dulu index.html memakai pemeriksaan teks longgar yang mencocokkan kata
+      // "token" di pesan apa pun. Itu memicu keluar-pakai-tanpa-signOut,
+      // dan karena sesi Supabase masih hidup, halaman login mengarahkan balik
+      // ke portal. Pengunjung terlempar bolak-balik tanpa henti.
+      if (/Sesi berakhir|Token tidak valid|belum login|Wajib login/i.test(data.message || '')) {
+        err.isAuthError = true;
+      }
+      throw err;
+    }
     return data;
+  }
+
+  /**
+   * Keluar dari Supabase Auth.
+   *
+   * WAJIB dipanggil setiap kali keluar dari portal. Kalau sesi dibiarkan
+   * hidup, halaman login akan melihat sesi itu masih sah lalu langsung
+   * mengarahkan balik ke portal - padahal yang baru saja dikeluarkan. Akibatnya
+   * pengunjung terlempar bolak-balik tanpa henti.
+   */
+  async function signOut() {
+    try {
+      var c = client;
+      if (!c && configured()) c = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+      if (c) await c.auth.signOut();
+    } catch (e) {
+      console.warn('Gagal keluar dari Supabase:', e.message);
+    }
   }
 
   function getAccessToken() {
@@ -794,6 +824,7 @@ window.RW26 = (function () {
     ready: ready,
     apiRequest: apiRequest,
     bootstrap: bootstrap,
+    signOut: signOut,
     legacySession: legacySession,
     cleanRichText: cleanRichText,
     plainText: plainText,

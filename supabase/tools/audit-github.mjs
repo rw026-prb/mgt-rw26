@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  audit-github.mjs  —  Unduh isi berkas dari GitHub, periksa di dalamnya.
 //
 //  Pemeriksaan nama berkas saja tidak cukup. Kunci bisa ikut ter-push di dalam
@@ -19,7 +19,23 @@ const POLA = [
   { nama: 'kunci service_role (nilai)', re: /SUPABASE_SERVICE_ROLE_KEY\s*=\s*["']?[A-Za-z0-9_.-]{40,}/ },
   { nama: 'kunci sb_secret_', re: /sb_secret_[A-Za-z0-9]/ },
   { nama: 'kredensial service account', re: /"type"\s*:\s*"service_account"/ },
-  { nama: 'kata sandi', re: /(?:password|passwd|pass)\s*[:=]\s*["'][^"'\s]{8,}["']/i },
+  {
+    nama: 'kata sandi',
+    // Yang dicari adalah nama variabel atau properti yang mengandung
+    // pass / pwd / secret / kunci, lalu nilainya credential.
+    // Bentuk: password: "..." | pwd="..." | secret: "..." | kunci="..."
+    //
+    // Batasnya perlu diketahui: ini heuristik, bukan pemindai rahasia
+    // sempurna. String panjang yang kebetulan berisi kata "password" di
+    // dalam variabel bernama lain TIDAK akan terdeteksi. Pemeriksaan yang
+    // menentukan adalah inspeksi payload JWT dan private key di atas -
+    // keduanya memeriksa isi nyatanya, bukan nama kuncinya.
+    re: /(?:pass|password|passwd|pwd|secret|kunci)\s*[:=]\s*["'][^"'\s${}]{8,}["']/i,
+    // Berkas uji sengaja memuat kata sandi tiruan, misalnya password bawaan
+    // PostgreSQL lokal yang databasenya langsung dibuang setelah pengujian.
+    // Yang berbahaya hanya kata sandi di berkas yang benar-benar dipakai.
+    lewatiDi: /(^|\/)test-[^/]*$/,
+  },
 ];
 
 /**
@@ -81,7 +97,9 @@ for (const r of REPOS) {
       } catch { /* abaikan */ }
     }
     for (const p of POLA) {
-      if (p.re && p.re.test(isi)) temuan.push(p.nama);
+      if (!p.re) continue;
+      if (p.lewatiDi && p.lewatiDi.test(b.path)) continue;
+      if (p.re.test(isi)) temuan.push(p.nama);
     }
     if (adaPrivateKeyAsli(isi)) temuan.push('private key Google (isi asli)');
 

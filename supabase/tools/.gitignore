@@ -1,5 +1,4 @@
 node_modules/
-pgdata/
+pgdata-*/
 out/
 .env
-pgdata-pwq/

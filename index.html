@@ -588,8 +588,9 @@
     // sehingga setelah baris ini aman untuk diteruskan.
     await window.RW26.ready;
     if (!window.RW26_SESSION) return;
+    // Diisi oleh RW26.bootstrap() setelah sesi Supabase terkonfirmasi.
     const session = window.RW26_SESSION;
-
+    const apiConfig=window.RW26_CONFIG||{};
     let announcements = [];
     let news = [];
     let facilities = [];
@@ -601,7 +602,6 @@
     let currentAlbum = null;
     let loadedMenus = {};
     let dashboardReady = false;
-    const apiConfig=window.RW26_CONFIG||{};
 
     const ALL_MENUS = [
       { id: 'dashboard', label: 'Dashboard', icon: 'bi-grid-1x2-fill', group: 'MENU UTAMA' },
@@ -768,9 +768,19 @@ async function apiRequest(action, payload = {}) {
     if (isMutation) _apiCacheClear(); else _apiCacheSet(key, data);
     return data;
   } catch (err) {
-    // Sesi habis (token kedaluwarsa atau akun dinonaktifkan) -> langsung
-    // keluarkan dari portal supaya tidak ada permintaan sia-sia berikutnya.
-    if (/Sesi berakhir|token|Sudah keluar/i.test(err.message || '')) logout(false);
+    // Hanya keluar dari portal bila kegagalan benar-benar soal autentikasi.
+    //
+    // Dulu di sini ada pemeriksaan longgar seperti /token/i pada pesan error.
+    // Itu salah: pesan apa pun yang memuat kata itu memicu keluar, dan karena
+    // keluar tidak menghapus sesi Supabase, halaman login mengarahkan balik
+    // ke portal. Hasilnya pengunjung terlempar bolak-balik terus-menerus.
+    //
+    // Sekarang penandanya datang dari jembatan (err.isAuthError) dan hanya
+    // dipasang untuk pesan yang memang tentang sesi.
+    if (err && err.isAuthError) {
+      logout();
+      throw err;
+    }
     throw err;
   } finally { delete _apiPending[key]; }
 }
@@ -1243,11 +1253,18 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     document.getElementById('userModal').addEventListener('show.bs.modal',()=>{const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');toggleMenuPermission();renderMenuCheckboxes([]);});
     document.getElementById('userModal').addEventListener('hidden.bs.modal',resetUserForm);
     document.getElementById('userRole').addEventListener('change',toggleMenuPermission);
-    // Sesi disimpan oleh Supabase Auth, bukan di localStorage. Bridge
-    // rw26-api.js yang memanggil signOut; storage cukup dibersihkan
-    // untuk membuang sisa versi lama.
-    function logout(notifyServer=true){
-      if(notifyServer)apiRequest('logout').catch(()=>{});
+    // Sesi disimpan oleh Supabase Auth, bukan di localStorage.
+    //
+    // PENTING: signOut() WAJIB dipanggil setiap kali keluar. Kalau tidak,
+    // sesi Supabase masih hidup di browser; halaman login akan melihatnya
+    // masih sah lalu mengarahkan balik ke portal - padahal kita baru saja
+    // mengeluarkannya. Pengunjung lalu terlempar bolak-balik tanpa henti.
+    async function logout(){
+      // Tandai waktu keluar. Halaman login memakai penanda ini supaya tidak
+      // langsung mengarahkan balik ke portal.
+      try{ sessionStorage.setItem('rw26_keluar_baru', String(Date.now())); }catch(e){}
+      try { if(window.RW26&&window.RW26.signOut) await window.RW26.signOut(); }
+      catch(e){ console.warn('Gagal keluar:',e.message); }
       localStorage.removeItem('rw26_session');sessionStorage.removeItem('rw26_session');
       location.replace('login.html');
     }
@@ -1286,7 +1303,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
         const res=await apiRequest('updateMyProfile',{profile:{email,noHp,currentPassword,newPassword:newPassword||'',confirmPassword:confirmPassword||''}});
         if(newPassword){
           toast('Password berhasil diubah. Silakan login kembali dengan password baru.');
-          setTimeout(()=>logout(false),2000);
+          setTimeout(()=>logout(),2000);
         }else{
           if(res.user){session.user=res.user;window.RW26_PROFILE=Object.assign({},window.RW26_PROFILE,res.user);}
           toast('Profil berhasil diperbarui.');
