@@ -14,6 +14,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Repo kedua hanya dipindai kalau memang ada di komputer ini. Di runner CI
+// hanya repo tempat skrip ini berada yang terunduh, jadi path itu tidak ada
+// dan harus dilewati - bukan membuat pemeriksaan gagal.
 const REPOS = [
   { nama: 'Mgt-portal RW', dir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..') },
   { nama: 'Website-RW26', dir: 'D:/Website RW/Website-RW26' },

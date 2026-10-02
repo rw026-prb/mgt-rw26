@@ -10,25 +10,42 @@
 // ============================================================================
 
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
-const src = fs.readFileSync('D:/Website RW/Mgt-portal RW/supabase/tools/audit-github.mjs', 'utf8');
+// Path relatif ke file ini. Ditulis mati dengan "D:/..." hanya akan jalan di
+// komputer itu saja, dan akan gagal di runner CI yang memakai Linux.
+const DI_SINI = path.dirname(fileURLToPath(import.meta.url));
+const src = fs.readFileSync(path.join(DI_SINI, 'audit-github.mjs'), 'utf8');
 const m = src.match(/function adaPrivateKeyAsli\(isi\) \{[\s\S]*?\n\}/);
 if (!m) {
   console.error('Fungsi adaPrivateKeyAsli tidak ditemukan di audit-github.mjs');
   process.exit(1);
 }
 const deklarasi = m[0].replace(/^function\s+/, '');
-const adaPrivateKeyAsli = eval('(' +deklarasi.replace(/^adaPrivateKeyAsli\s*\(isi\)\s*\{/, 'function (isi) {') + ')');
+const adaPrivateKeyAsli = eval('(' + deklarasi.replace(/^adaPrivateKeyAsli\s*\(isi\)\s*\{/, 'function (isi) {') + ')');
 
-const envAsli = fs.readFileSync('D:/Website RW/Mgt-portal RW/supabase/tools/.env', 'utf8');
-const barisKey = (envAsli.match(/^GOOGLE_PRIVATE_KEY\s*=\s*(.*)$/m) || [])[1] || '';
-const keyAsli = barisKey.trim().replace(/^"/, '').replace(/"$/, '').replace(/\\n/g, '\n');
+/*
+ * Kunci privat DIBAKAL di sini, bukan diambil dari .env.
+ *
+ * Alasannya dua. Pertama, berkas .env tidak ada di runner CI, jadi uji ini
+ * akan gagal di sana. Kedua - dan ini yang lebih penting - sebuah pengujian
+ * tidak seharusnya pernah membaca kunci sungguhan. Kalau skrip ini ikut
+ * ter-commit bersama kuncinya, kebocoran itu justru menjaditools pengujiannya sendiri.
+ */
+const pasangan = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+});
+const keyAsli = pasangan.privateKey;
 
 const contohReadme =
   'GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBg...\\nOT...\\n-----END PRIVATE KEY-----\\n"';
 
 const kasus = [
-  ['private key asli dari .env', keyAsli, true],
+  ['private key RSA asli (dibuat saat uji)', keyAsli, true],
   ['contoh di README (ada "...")', contohReadme, false],
   ['tidak ada private key sama sekali', 'SELECT 1 FROM dual', false],
   ['BEGIN dan END tanpa isi', '-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----', false],
