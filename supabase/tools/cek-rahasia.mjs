@@ -78,7 +78,13 @@ function telusuri(dir) {
       telusuri(path.join(dir, e.name));
       continue;
     }
-    if (!/\.(js|mjs|html|json|yml|md|sql)$/i.test(e.name)) continue;
+    // `.gs` ikut dipindai. Code.gs yang memuat kunci service_role akan
+    // ikut ter-*push* ke repository publik, sama seperti berkas HTML.
+    //
+    // Yang DICARI adalah nilai kuncinya, bukan nama variabelnya. Code.gs
+    // deserve memuat teks 'SUPABASE_SERVICE_ROLE_KEY' sebagai nama Script
+    // Property - itu bukan kebocoran.
+    if (!/\.(js|mjs|gs|html|json|yml|md|sql)$/i.test(e.name)) continue;
     if (e.name === '.env.example') continue;
     if (lewatiFile.has(e.name)) continue;
     const p = path.join(dir, e.name);

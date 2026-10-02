@@ -105,10 +105,10 @@ jobs:
           echo "OK: .env tidak pernah masuk riwayat git."
 
       - name: Pastikan kredensial Apps Script tidak ada di berkas yang ter-publish
-        run: |
-          if grep -q "SUPABASE_SERVICE_ROLE_KEY" ../../Code.gs; then
-            echo "::error::Code.gs memuat kunci service_role secara langsung."
-            echo "::error::Kuncinya harus disimpan di Script Properties, bukan di dalam file."
-            exit 1
-          fi
-          echo "OK: Code.gs tidak memuat kunci secara langsung."
+        # Code.gs memang memuat teks 'SUPABASE_SERVICE_ROLE_KEY' sebagai nama
+        # Script Property - itu bukan kebocoran. Yang berbahaya adalah NILAI
+        # kuncinya, jadi yang diperiksa adalah nilai itu, bukan namanya.
+        #
+        # cek-rahasia.mjs sudah memindai Code.gs (ekstensi .gs) bersama
+        # seluruh berkas lain, jadi tidak perlu grep terpisah di sini.
+        run: node cek-rahasia.mjs
