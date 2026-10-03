@@ -493,7 +493,7 @@ window.RW26 = (function () {
       var up = await uploadFotoIfAny(k, 'kas');
       var tanggal = toIsoDate(k.tanggal);
       if (!tanggal) throw new Error('Tanggal transaksi tidak valid.');
-      // 어느 field가 terisi ditentukan oleh jenis form, bukan oleh nilai
+      // Field mana yang terisi ditentukan oleh jenis form, bukan oleh nilai
       // nominal: pengguna mengetik nominal di kolom yang sama untuk keduanya.
       var isMasuk = k.jenis_form === 'masuk';
       var patch = {
@@ -531,7 +531,7 @@ window.RW26 = (function () {
 
     // ======================= DASHBOARD =======================
     async dashboardData() {
-      // news tetap dari Apps Script (tab erita), sisanya dari Supabase.
+      // news tetap dari Apps Script (tab berita), sisanya dari Supabase.
       var sb = supabase();
       var hasil = await Promise.all([
         sb.from('statistik_warga').select('*').order('id', { ascending: true }),

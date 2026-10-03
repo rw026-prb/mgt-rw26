@@ -26,7 +26,7 @@ const path = require('path');
 const { Client } = require('pg');
 
 const MIG_DIR = path.join(__dirname, '..', 'migrations');
-const FILES = ['0001_schema.sql', '0002_rls.sql', '0002b_lockdown.sql', '0003_functions.sql', '0004_migration_audit.sql', '0005_bridge_grants.sql', '0006_organisasi_id.sql', '0007_password_change.sql', '0008_login_dengan_user_id.sql'];
+const FILES = ['0001_schema.sql', '0002_rls.sql', '0002b_lockdown.sql', '0003_functions.sql', '0004_migration_audit.sql', '0005_bridge_grants.sql', '0006_organisasi_id.sql', '0007_password_change.sql', '0008_login_dengan_user_id.sql', '0009_reset_password_sendiri.sql'];
 
 const MOCK_SUPABASE = `
 create schema if not exists auth;

@@ -62,7 +62,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <p class="text-secondary small mb-3">Masukkan email yang terdaftar. Link reset password akan dikirim ke email tersebut.</p>
+          <p class="text-secondary small mb-3">Masukkan email yang terdaftar. Link reset password akan dikirim dari Gmail RW 26 dan berlaku <strong>60 menit</strong> serta hanya bisa dipakai satu kali.</p>
           <div class="alert alert-danger d-none" id="resetAlert"></div>
           <div class="alert alert-success d-none" id="resetSuccess"></div>
           <form id="forgotPasswordForm">
@@ -218,6 +218,66 @@
       new bootstrap.Modal('#forgotPasswordModal').show();
     };
 
+    // -------------------------------------------------------------------------
+    //  Mengirim email reset password
+    // -------------------------------------------------------------------------
+    //  Email reset dibuat oleh Google Apps Script (Code.gs) lalu dikirim lewat
+    //  MailApp; Supabase hanya menyimpan passwordnya. Alasannya ada di
+    //  kepala modul RESET PASSWORD MANDIRI di Code.gs.
+    //
+    //  Pola fetch di bawah MENYALIN rw26-api.js:682-687 persis:
+    //    - Content-Type text/plain, bukan application/json. Kalau JSON,
+    //      peramban mengirim OPTIONS lebih dulu (preflight), dan Apps Script
+    //      tidak menjawabnya - Request akan gagal.
+    //    - redirect:'follow', karena script.google.com memutar ke
+    //      script.googleusercontent.com. Header CORS ada di URL tujuan.
+    //  Pola itu sudah berjalan di produksi untuk galeri, berita, dan
+    //  manajemen pengguna, jadi jangan mengarang yang baru di sini.
+    const APPS_SCRIPT_TERPASANG=typeof cfg.APPS_SCRIPT_URL==='string'
+      &&cfg.APPS_SCRIPT_URL.startsWith('https://script.google.com/');
+
+    async function appsScriptPublik_(action,payload){
+      // Sengaja tanpa token. Tiga aksi reset password dijalankan sebelum
+      // pengguna punya sesi - justru itulah gunanya.
+      const res=await fetch(cfg.APPS_SCRIPT_URL,{
+        method:'POST',
+        redirect:'follow',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify(Object.assign({action:action},payload||{}))
+      });
+      const teks=await res.text();
+      let data;
+      try{ data=JSON.parse(teks); }
+      catch(_){ throw new Error('Server sedang sibuk, coba lagi beberapa saat.'); }
+      if(!data||!data.ok) throw new Error((data&&data.message)||'Permintaan gagal.');
+      return data;
+    }
+
+    // Diterjemahkan supaya yang tampil ke warga tidak berupa teks teknis
+    // berbahasa Inggris seperti "Error sending recovery email".
+    //
+    // CATATAN KEAMANAN: yang dipetakan di sini HANYA kegagalan sistem. Email
+    // yang tidak terdaftar SELALU dijawab "dikirim" oleh Code.gs. Kalau
+    // jawabannya berbeda tergantung email terdaftar, form ini berubah jadi
+    // alat menebak email milik warga lain - jadi jangan pernah menambahkan
+    // cabang yang menyingkap "email tidak ditemukan".
+    function pesanResetError_(err){
+      const pesan=String((err&&err.message)||'');
+      if(/Aksi API tidak dikenal/i.test(pesan)){
+        return 'Server belum diperbarui. Hubungi Super Admin untuk deploy ulang.';
+      }
+      if(/Konfigurasi Supabase belum dipasang/i.test(pesan)){
+        return 'Server belum dikonfigurasi. Hubungi Super Admin.';
+      }
+      if(/Server sedang sibuk|jaringan|NetworkError|Failed to fetch|tidak dapat terhubung/i.test(pesan)){
+        return 'Tidak dapat terhubung ke server. Periksa koneksi internet Anda lalu coba lagi.';
+      }
+      if(/terlalu banyak|kuota|quota|too many/i.test(pesan)){
+        return 'Terlalu banyak permintaan. Tunggu beberapa saat lalu coba lagi.';
+      }
+      return pesan||'Gagal mengirim email. Coba lagi sebentar.';
+    }
+
     document.getElementById('forgotPasswordForm').onsubmit=async e=>{
       e.preventDefault();
       const btn=document.getElementById('resetSubmit')
@@ -225,23 +285,23 @@
         ,successEl=document.getElementById('resetSuccess')
         ,email=document.getElementById('resetEmail').value.trim();
       alertEl.classList.add('d-none');successEl.classList.add('d-none');
-      if(!configured){alertEl.textContent=PESAN.konfigurasi;alertEl.classList.remove('d-none');return;}
+      if(!APPS_SCRIPT_TERPASANG){alertEl.textContent=PESAN.konfigurasi;alertEl.classList.remove('d-none');return;}
       btn.disabled=true;
       btn.querySelector('.reset-btn-label').classList.add('d-none');
       btn.querySelector('.reset-spinner').classList.remove('d-none');
       try{
-        // Selalu menampilkan pesan yang sama, apa pun hasilnya. Kalau
-        // jawabannya berbeda tergantung email terdaftar, itu memberi tahu
-        // penyerang email mana yang sudah punya akun.
-        const {error}=await sb.auth.resetPasswordForEmail(email,{
-          redirectTo: location.origin + location.pathname.replace(/[^/]*$/,'update-password.html')
-        });
-        if(error) throw new Error(error.message);
-        successEl.textContent='Link reset password telah dikirim ke email tersebut jika terdaftar.';
+        // Link reset dibuat oleh Google Apps Script lalu dikirim lewat Gmail
+        // RW 26 - bukan oleh Supabase. Yang dikembalikan server sengaja
+        // selalu berupa pesan yang sama, apa pun hasilnya, sehingga form ini
+        // tidak bisa dipakai menebak email mana yang terdaftar.
+        const hasil=await appsScriptPublik_('requestPasswordReset',{email:email});
+        successEl.textContent=hasil.message
+          ||'Jika email tersebut terdaftar, link reset password sudah kami kirim.';
         successEl.classList.remove('d-none');
         document.getElementById('forgotPasswordForm').reset();
       }catch(err){
-        alertEl.textContent=err.message;alertEl.classList.remove('d-none');
+        alertEl.textContent=pesanResetError_(err);
+        alertEl.classList.remove('d-none');
       }finally{
         btn.disabled=false;
         btn.querySelector('.reset-btn-label').classList.remove('d-none');

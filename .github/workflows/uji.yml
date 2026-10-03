@@ -89,12 +89,83 @@ jobs:
       - name: Uji deteksi private key
         run: node test-privkey.mjs
 
+      - name: Periksa sintaks skrip inline di HTML
+        # Langkah di atas hanya menemukan *.js dan *.mjs. Isi <script> di
+        # dalam .html sama sekali tidak ikut diperiksa - padahal login.html
+        # dan update-password.html masing-masing ratusan baris JavaScript.
+        # Satu karakter yang salah ketik akan merusak seluruh halaman tanpa
+        # build yang gagal.
+        run: node cek-inline.mjs
+
+      - name: Cari karakter asing yang menyusup ke teks
+        # Komentar dan pesan di repo ini ditulis dalam Bahasa Indonesia.
+        # Karakter dari aksara lain (Han, Cyrillic) kadang ikut terbawa ke
+        # dalam kata Indonesia dan tidak akan pernah ditemukan oleh grep
+        # biasa. Contoh nyata yang sudah pernah ada di repo ini dirinci di
+        # kepala cek-asing.mjs.
+        run: node cek-asing.mjs
+
+      - name: Cari karakter kontrol yang tersembunyi di teks
+        # Menyalin dan menempel kadang menyisakan karakter kontrol seperti
+        # U+0008 BACKSPACE di dalam kata. Contoh nyata yang sudah ada di
+        # assets/js/rw26-api.js: huruf 'b' pada "berita" tergantikan backspace,
+        # dan teksnya tetap terbaca benar di editor.
+        #
+        # Kalau yang sampai ke dalam string literal, kode yang terlihat benar
+        # bisa jadi tidak sama sekali saat dijalankan. TAB, LF, dan CR
+        # dikecualikan karena normal di berkas teks.
+        run: node cek-kontrol.mjs
+
+      - name: Cari mojibake (teks UTF-8 yang salah dibaca)
+        # Tanda baca UTF-8 yang dibaca sebagai cp1252 berubah jadi beberapa
+        # karakter aneh yang TETAP SAH secara sintaks: `—` (E2 80 94) jadi
+        # tiga karakter, `·` (C2 B7) jadi dua. node --check tetap lulus, dan
+        # cek-asing tidak melaporkannya karena karakter hasilnya ada di
+        # allowlist - padahal tampilannya rusak di layar.
+        run: node cek-mojibake.mjs
+
+      - name: Pastikan akhir baris tiap berkas konsisten
+        # `core.autocrlf=true` di Windows membuat git menormalkan sendiri, tapi
+        # berkas yang CAMPUR (sebagian CRLF, sebagian LF) tidak pernah
+        # dirapikan di kedua arah. Yang muncul hanya karena alat penyunting
+        # menulis LF pada baris yang disentuh.
+        run: node samakan-akhir-baris.mjs
+
+      - name: Pastikan setiap handler inline punya definisi
+        # index.html dibungkus `(async () => { ... })()`. Setiap `function`
+        # di dalam IIFE itu TIDAK menjadi properti window, sementara atribut
+        # `onclick="nukaFungsi()"` dieksekusi browser sebagai kode global.
+        # Kalau namanya tidak diekspor, browser melempar ReferenceError dan
+        # handler itu diam-diam tidak pernah jalan.
+        #
+        # Gejalanya persis seperti "dropdownnya tidak muncul": <select> bulan
+        # dan tahun ada di markup tapi isinya kosong, karena <option>-nya
+        # dibuat oleh fungsi yang tidak pernah terpanggil. Tidak ada error di
+        # layar - cuma di konsol.
+        run: node cek-handler.mjs
+
+      - name: Pastikan setiap id yang dipanggil ada di markup
+        # getElementById() mengembalikan null untuk id yang tidak ada, bukan
+        # error. Efeknya `null.textContent = ...` yang melempar TypeError di
+        # tengah fungsi - dan kalau yang gagal adalah initializer, seluruh
+        # tab itu tidak pernah jalan.
+        run: node cek-id.mjs
+
       - name: Uji alur ganti password untuk akun Editor
         # Akun Editor tidak bisa mengubah tabel profiles sendiri, karena RLS
         # membatasi perubahan pada tabel itu untuk Admin. Kalau penanda
         # must_change_pw diturunkan lewat update biasa, akun Editor akan
         # tersangkut di halaman ganti password selamanya - tanpa pesan error.
         run: node test-ganti-password.mjs
+
+      - name: Uji keamanan token reset password mandiri
+        # Tiga aksi reset password berjalan TANPA sesi - orang yang minta
+        # reset memang belum bisa login. Itu membuat tabel token jadi satu-
+        #-satunya permukaan serangan yang terbuka untuk siapa saja. Test ini
+        # membuktikan anon dan authenticated tidak bisa menyentuh tabel itu,
+        # akun nonaktif tidak dipetakan, token single-use, dan token ikut
+        # terhapus bersama akunnya.
+        run: node test-reset-token.mjs
 
       - name: Uji alur keluar-masuk (anti pantulan)
         # Portal yang mengeluarkan pengguna tapi tidak menghapus sesi akan

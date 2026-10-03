@@ -175,6 +175,23 @@ function doPost(e) {
       case 'updateUser': return updateSupabaseUser_(body);
       case 'deleteUser': return deleteSupabaseUser_(body);
 
+      // ---- Reset password mandiri ----
+      //  PENTING: tiga aksi di bawah TIDAK memanggil requireSupabaseUser_().
+      //  Itu disengaja, bukan kelalaian. Saat_reset password yang diminta,
+      //  orang BELUM punya sesi - itulah sebabnya dia tidak bisa login. Yang
+      //  menggantikannya adalah token 256-bit yang hanya ada di emailnya.
+      //
+      //  Konsekuensinya, tiga aksi ini adalah satu-satunya titik masuk yang
+      //  terbuka untuk siapa saja tanpa login. Pertahanannya:
+      //    - token 256-bit, single-use, berlaku 60 menit
+      //    - yang tersimpan di database hanya hash SHA-256-nya
+      //    - cooldown 60 detik per email
+      //    - jawaban "dikirim"/"tidak dikirim" selalu sama, sehingga tidak
+      //      bisa dipakai menebak email mana yang terdaftar
+      case 'requestPasswordReset': return requestPasswordReset_(body);
+      case 'checkPasswordResetToken': return checkPasswordResetToken_(body);
+      case 'resetPassword': return resetPassword_(body);
+
       // ---- Upload foto untuk modul yang datanya ada di Supabase ----
       case 'uploadDriveImage': return uploadDriveImage_(body);
 
@@ -383,6 +400,413 @@ function fetchSupabaseProfileByLegacyId_(cfg, legacyId) {
 }
 
 // ============================================================================
+//  RESET PASSWORD MANDIRI
+// ============================================================================
+//  Alurnya, dari samping:
+//    1. Halaman login memanggil requestPasswordReset.
+//    2. Kode menerbitkan token 256-bit, menyimpan HASH-nya ke
+//       public.password_reset_tokens, lalu mengirim tautannya lewat MailApp
+//       (Gmail milik pemilik proyek Apps Script).
+//    3. Tautan membuka update-password.html?token=... yang memanggil
+//       checkPasswordResetToken, lalu resetPassword saat formulir dikirim.
+//
+//  Kenapa tidak pakai supabase.auth.resetPasswordForEmail?
+//  ------------------------------------------------------------
+//  Email Supabase berisi tautan ke Site URL proyek. Kalau Site URL itu tidak
+//  sesuai dengan domain yang sedang dipakai, tautannya mendarat di localhost
+//  dan tidak bisa dibuka - persis keluhan yang terjadi. Dengan tautan yang
+//  dibuat sendiri, alamat tujuannya kita yang menentukan.
+//
+//  Supabase Auth tetap menjadi penyimpan password. Yang diganti hanya cara
+//  link dibuat dan dikirim.
+//
+//  TIGA ATURAN YANG TIDAK BOLEH DILEWATI
+//  --------------------------------------
+//  1. Jawabannya SELALU sama, apa pun hasilnya. Kalau "tidak terdaftar"
+//     dibedakan dari "terkirim", form ini jadi alat menebak email mana yang
+//     punya akun.
+//  2. Alamat dasar tautan TIDAK boleh diambil dari permintaan. Kalau berasal
+//     dari body, penyerang bisa mengirim permintaan atas nama korban dengan
+//     alamat domain miliknya, sehingga korban menerima tautan ke situs
+//     penyerang. Karena itu alamatnya dibaca dari Script Property.
+//  3. Kegagalan mengirim TIDAK boleh dilaporkan sebagai error. Kalau MailApp
+//     kehabisan kuota dan itu muncul sebagai pesan gagal, keadaan kuota yang
+//     habis berubah jadi oracle: email terdaftar (gagal kirim) bisa
+//     dibedakan dari email tidak terdaftar (berhasil diam-diam).
+//     Kegagalan dicatat ke log eksekusi, yang hanya dilihat admin.
+// ============================================================================
+
+const RESET_TOKEN_MENIT = 60;
+const RESET_COOLDOWN_DETIK = 60;
+const RESET_PANGKAS_HARI = 7;
+const RESET_SENDER_NAMA = 'RW 26 Pengasinan Rawalumbu';
+
+// Pesan yang sama persis untuk email terdaftar, tidak terdaftar, nonaktif,
+// cooldown, dan email saat kuota MailApp habis.
+function pesanResetUmum_() {
+  return 'Jika email tersebut terdaftar, link reset password sudah kami kirim. '
+    + 'Periksa juga folder spam sebelum mencari-cari email lain.';
+}
+
+/**
+ * Alamat dasar portal, untuk menyusun tautan di dalam email.
+ *
+ * Dibaca dari Script Property PUBLIC_BASE_URL. Kalau kosong, memakai domain
+ * produksi sebagai cadangan - supaya portal tetap berfungsi kalau property-nya
+ * lupa dipasang. Yang penting bukan diambil dari permintaan.
+ */
+function publicBaseUrl_() {
+  const props = PropertiesService.getScriptProperties();
+  const tersimpan = String(props.getProperty('PUBLIC_BASE_URL') || '').trim().replace(/\/+$/, '');
+  return tersimpan || 'https://mgt.rw026.my.id';
+}
+
+/** 256 bit acak: dua UUID tanpa tanda hubung, jadi 64 karakter heksadesimal. */
+function tokenResetAcak_() {
+  return Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+}
+
+/**
+ * Hash SHA-256 dari token, dalam bentuk heksadesimal.
+ *
+ * Bentuk heksadesimal dipilih supaya aman dipakai langsung di query string
+ * PostgREST. base64 bisa memuat '+', '/', dan '=' yang harus di-encode, dan
+ * satu karakter yang lupa di-encode akan membuat query gagal diam-diam.
+ *
+ * Perbandingan token SELALU dilakukan lewat kolom token_hash, bukan dengan
+ * membandingkan string di JavaScript - yang dibandingkan hanya hash-nya.
+ */
+function hashToken_(token) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, String(token), Utilities.Charset.UTF_8);
+  return bytes.map(function (b) {
+    // computeDigest bisa mengembalikan byte negatif; & 0xff mengembalikannya
+    // ke 0..255 sebelum jadi dua digit heksa.
+    return ('0' + (b & 0xff).toString(16)).slice(-2);
+  }).join('');
+}
+
+/** Panggil fungsi PostgreSQL lewat PostgREST, memakai kunci service_role. */
+function supabaseRpc_(cfg, namaFungsi, argumen) {
+  const res = UrlFetchApp.fetch(cfg.url + '/rest/v1/rpc/' + encodeURIComponent(namaFungsi), {
+    method: 'post',
+    headers: {
+      apikey: cfg.serviceRoleKey,
+      Authorization: 'Bearer ' + cfg.serviceRoleKey,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify(argumen || {}),
+    muteHttpExceptions: true
+  });
+  const teks = res.getContentText();
+  if (res.getResponseCode() < 200 || res.getResponseCode() >= 300) {
+    throw new Error('Supabase menolak RPC ' + namaFungsi + ': ' + String(teks).slice(0, 200));
+  }
+  // Fungsi yang mengembalikan skalar dikirim PostgREST apa adanya (mis. "null"
+  // atau "\"uuid\""), bukan array. Nilai kosong berarti tidak ketemu - itu
+  // jawaban yang sah, bukan kegagalan.
+  if (!teks || teks === 'null') return null;
+  try { return JSON.parse(teks); } catch (e) { return teks; }
+}
+
+/** Ambil email pemilik akun dari Supabase Auth. */
+function ambilEmailUser_(cfg, userId) {
+  try {
+    const u = supabaseAdmin_('get', '/auth/v1/admin/users/' + encodeURIComponent(userId));
+    return (u && u.email) ? String(u.email) : '';
+  } catch (e) {
+    console.warn('ambilEmailUser gagal untuk ' + userId + ': ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * Minta link reset. Dijawab dengan pesan yang sama apa pun hasilnya.
+ */
+function requestPasswordReset_(body) {
+  const email = String(body.email || '').trim().toLowerCase();
+
+  // Bentuk email tidak benar. Tetap dijawab dengan pesan yang sama supaya
+  // bentuk input juga tidak menambah informasi apa pun.
+  if (!email || email.indexOf('@') < 1) return json_({ ok: true, message: pesanResetUmum_() });
+
+  // Cooldown per email, 60 detik. Tanpa ini, form ini bisa dipakai untuk
+  // membanjiri kotak masuk orang dan menghabiskan kuota MailApp.
+  const kunciCooldown = 'rst_cd_' + hashToken_(email);
+  if (cacheGet_(kunciCooldown) !== undefined) {
+    return json_({ ok: true, message: pesanResetUmum_() });
+  }
+  cacheSet_(kunciCooldown, '1', RESET_COOLDOWN_DETIK);
+
+  const cfg = supabaseConfig_();
+  if (!cfg.url || !cfg.serviceRoleKey) {
+    throw new Error('Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().');
+  }
+
+  // Pangkas token lama. Dilakukan SETELAH diketahui emailnya terdaftar, jadi
+  // permintaan untuk email yang tidak dikenal tidak menyentuh tabel ini.
+  //
+  // Email tidak ada, atau akunnya sudah dinonaktifkan. Fungsi
+  // cari_user_id_by_email sengaja tidak membedakan keduanya, dan jawaban
+  // ke peramban tetap sama.
+  let userId = null;
+  try {
+    userId = supabaseRpc_(cfg, 'cari_user_id_by_email', { p_email: email }) || null;
+  } catch (e) {
+    console.warn('cari_user_id_by_email gagal: ' + e.message);
+  }
+  if (!userId) {
+    // Sengaja TIDAK menulis ke activity_log.
+    //
+    // Aksi ini terbuka tanpa login, jadi siapa pun bisa memanggilnya dengan
+    // email sembarang. Kalau setiap permintaan menulis satu baris, penyerang
+    // bisa mengisi activity_log dengan sampah - dan tabel itu tidak pernah
+    // dipangkas (dulu dipangkas jadi 101 baris terakhir, sekarang tidak).
+    // Catatan cukup di log eksekusi, yang hanya bisa dilihat admin.
+    console.warn('Permintaan reset untuk email yang tidak terdaftar atau nonaktif.');
+    return json_({ ok: true, message: pesanResetUmum_() });
+  }
+
+  try {
+    const batas = new Date(Date.now() - RESET_PANGKAS_HARI * 86400000).toISOString();
+    supabaseAdmin_('delete', '/rest/v1/password_reset_tokens?tanggal_dibuat=lt.' + encodeURIComponent(batas));
+  } catch (e) {
+    console.warn('pangkas token lama gagal: ' + e.message);
+  }
+
+  // Batalkan token yang masih hidup milik user ini. Satu permintaan terbaru
+  // saja yang berlaku; permintaan berikutnya menggantikan yang lama.
+  try {
+    supabaseAdmin_('patch',
+      '/rest/v1/password_reset_tokens?user_id=eq.' + encodeURIComponent(userId) + '&tanggal_dipakai=is.null',
+      { tanggal_dipakai: new Date().toISOString() });
+  } catch (e) {
+    console.warn('pembatalan token lama gagal untuk ' + userId + ': ' + e.message);
+  }
+
+  // Terbitkan token baru. Yang tersimpan hanya hash-nya.
+  const token = tokenResetAcak_();
+  const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
+  supabaseAdmin_('post', '/rest/v1/password_reset_tokens', {
+    user_id: userId,
+    token_hash: hashToken_(token),
+    tanggal_kedaluwarsa: kedaluwarsa
+  });
+
+  const link = publicBaseUrl_() + '/update-password.html?token=' + encodeURIComponent(token);
+
+  try {
+    kirimResetEmail_(email, link, kedaluwarsa);
+  } catch (e) {
+    // Sengaja ditelan. Lihat aturan ke-3 di kepala modul ini: menampilkan
+    // kegagalan kirim akan membedakan email terdaftar dari tidak
+    // terdaftar, tepat ketika kuota MailApp sedang habis.
+    console.error('GAGAK KIRIM reset ke ' + email + ' (token tetap berlaku): ' + e.message);
+  }
+
+  logActivity_(null, 'reset', 'users', 'Mengirim link reset password ke ' + email);
+  return json_({ ok: true, message: pesanResetUmum_() });
+}
+
+/** Periksa token sebelum menampilkan formulir password baru. */
+function checkPasswordResetToken_(body) {
+  const token = String(body.token || '').trim();
+  if (!token) throw new Error('Token reset tidak ditemukan di tautan.');
+
+  const cfg = supabaseConfig_();
+  if (!cfg.url || !cfg.serviceRoleKey) {
+    throw new Error('Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().');
+  }
+
+  const sekarang = new Date().toISOString();
+  const rows = supabaseAdmin_('get',
+    '/rest/v1/password_reset_tokens?select=user_id,tanggal_kedaluwarsa'
+    + '&token_hash=eq.' + encodeURIComponent(hashToken_(token))
+    + '&tanggal_dipakai=is.null'
+    + '&tanggal_kedaluwarsa=gt.' + encodeURIComponent(sekarang));
+
+  const baris = (Array.isArray(rows) && rows.length) ? rows[0] : null;
+  if (!baris) {
+    throw new Error('Tautan reset sudah tidak berlaku. Minta link baru dari halaman login.');
+  }
+
+  return json_({
+    ok: true,
+    email: ambilEmailUser_(cfg, baris.user_id),
+    kedaluwarsa: baris.tanggal_kedaluwarsa
+  });
+}
+
+/**
+ * Ganti password memakai token, lalu matikan tokennya.
+ *
+ * Token diklaim DULU, baru password diganti. Urutan itu yang membuat token
+ * hanya bisa dipakai sekali: klaimnya berupa UPDATE berkondisi
+ * `tanggal_dipakai IS NULL`, jadi permintaan kedua tidak menemukan baris
+ * untuk diambil dan langsung ditolak.
+ */
+function resetPassword_(body) {
+  const token = String(body.token || '').trim();
+  const password = String(body.newPassword || '');
+  if (!token) throw new Error('Token reset tidak ditemukan di tautan.');
+  if (password.length < 8) throw new Error('Password baru minimal 8 karakter.');
+
+  const cfg = supabaseConfig_();
+  if (!cfg.url || !cfg.serviceRoleKey) {
+    throw new Error('Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().');
+  }
+
+  // Klaim token. Nol baris terpakai berarti token sudah dipakai atau sudah
+  // kedaluwarsa.
+  const sekarang = new Date().toISOString();
+  const diklaim = supabaseAdmin_('patch',
+    '/rest/v1/password_reset_tokens?token_hash=eq.' + encodeURIComponent(hashToken_(token))
+    + '&tanggal_dipakai=is.null'
+    + '&tanggal_kedaluwarsa=gt.' + encodeURIComponent(sekarang),
+    { tanggal_dipakai: sekarang });
+
+  const baris = (Array.isArray(diklaim) && diklaim.length) ? diklaim[0] : null;
+  if (!baris) {
+    throw new Error('Tautan reset sudah tidak berlaku. Minta link baru dari halaman login.');
+  }
+  const userId = baris.user_id;
+
+  try {
+    supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(userId), { password: password });
+  } catch (e) {
+    // Token sudah diklaim tapi password gagal diganti. Kembalikan klaimnya,
+    // kalau tidak orang yang benar-benar punya akses ke mailbox ikut
+    // kehilangan haknya karena masalah server.
+    try {
+      supabaseAdmin_('patch', '/rest/v1/password_reset_tokens?id=eq.' + encodeURIComponent(baris.id),
+        { tanggal_dipakai: null });
+    } catch (e2) {
+      console.error('GAGAL membatalkan klaim token untuk ' + userId + ': ' + e2.message);
+    }
+    throw e;
+  }
+
+  // Password sudah diganti. Turunkan penanda must_change_pw supaya index.html
+  // tidak mengarahkan orang ini balik ke halaman ganti password.
+  //
+  // BUKAN lewat RPC complete_password_change() seperti di alur Supabase.
+  // RPC itu membaca auth.uid(), sedangkan di alur ini tidak ada sesi
+  // Supabase sama sekali - yang memegang identitas hanya token. Karena itu
+  // kolomnya ditulis langsung lewat service_role.
+  try {
+    supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(userId), {
+      must_change_pw: false,
+      login_terakhir: sekarang
+    });
+  } catch (e) {
+    console.error('GAGAL turunkan must_change_pw untuk ' + userId + ': ' + e.message);
+  }
+
+  // Paksa keluar dari semua perangkat. Mengganti password di Supabase tidak
+  // otomatis membatalkan sesi yang sudah dibuat - sesi yang dibuat dengan
+  // password lama akan tetap hidup kalau langkah ini dilewati.
+  try {
+    supabaseAdmin_('post', '/auth/v1/admin/users/' + encodeURIComponent(userId) + '/logout',
+      { scope: 'global' });
+  } catch (e) {
+    console.warn('logout global gagal untuk ' + userId + ': ' + e.message);
+  }
+
+  logActivity_(null, 'update', 'users', 'Password diganti lewat tautan reset mandiri');
+  return json_({ ok: true, message: 'Password berhasil diganti.' });
+}
+
+/**
+ * Kirim email reset lewat MailApp.
+ *
+ * Pengirimnya adalah Gmail pemilik proyek Apps Script dan tidak bisa diubah
+ * per pesan - MailApp dan GmailApp sama-sama mengirim sebagai akun itu.
+ * Yang bisa diubah hanya nama tampilan lewat parameter `name`.
+ *
+ * Kuota MailApp sekitar 100 email per hari untuk akun @gmail.com biasa, dan
+ * 1500 per hari untuk Google Workspace.
+ */
+function kirimResetEmail_(email, link, kedaluwarsaIso) {
+  const jam = formatDate_(new Date(kedaluwarsaIso));
+
+  const teks = 'Halo,\n\n'
+    + 'Ada permintaan untuk mengganti password akun Anda di Portal Manajemen RW 26\n'
+    + 'Pengasinan Rawalumbu.\n\n'
+    + 'Gunakan tautan ini untuk membuat password baru:\n' + link + '\n\n'
+    + 'Tautan berlaku sampai ' + jam + ' dan hanya bisa dipakai satu kali.\n\n'
+    + 'Kalau Anda tidak meminta ini, abaikan saja email ini. Password Anda tidak\n'
+    + 'berubah sampai tautannya benar-benar dipakai.\n\n'
+    + 'RW 26 Pengasinan Rawalumbu';
+
+  MailApp.sendEmail({
+    to: email,
+    subject: 'Ganti password Portal RW 26',
+    body: teks,
+    htmlBody: emailResetHtml_(link, jam),
+    name: RESET_SENDER_NAMA
+  });
+}
+
+/**
+ * Bentuk HTML email.
+ *
+ * Gmail membuang tag <style> di dalam tubuh email, jadi semua gaya ditulis
+ * sebagai atribut style langsung. Tabel, bukan flex/grid - sama alasannya.
+ */
+function emailResetHtml_(link, jam) {
+  const tombol = '<table role="presentation" cellpadding="0" cellspacing="0" border="0"'
+    + ' style="border-collapse:separate;"><tr><td align="center" bgcolor="#0a6c50"'
+    + ' style="border-radius:12px;"><a href="' + escapeHtml_(link) + '"'
+    + ' style="display:inline-block;padding:14px 32px;font-family:Helvetica,Arial,sans-serif;'
+    + 'font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:12px;">'
+    + 'Buat Password Baru</a></td></tr></table>';
+
+  return '<!doctype html><html lang="id"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+    + '<body style="margin:0;padding:0;background:#f3f7f5;font-family:Helvetica,Arial,sans-serif;color:#1f2d28;">'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
+    + ' style="background:#f3f7f5;"><tr><td align="center" style="padding:28px 14px;">'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
+    + ' style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;">'
+
+    + '<tr><td style="background:#0a6c50;padding:22px 28px;color:#ffffff;">'
+    + '<div style="font-size:18px;font-weight:bold;letter-spacing:.5px;">RW 26</div>'
+    + '<div style="font-size:12px;opacity:.85;letter-spacing:.6px;">PENGASINAN &middot; RAWALUMBU</div>'
+    + '</td></tr>'
+
+    + '<tr><td style="padding:28px;">'
+    + '<div style="font-size:12px;font-weight:bold;color:#0a6c50;letter-spacing:.6px;'
+    + 'padding-bottom:6px;">GANTI PASSWORD</div>'
+    + '<h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#12211c;">'
+    + 'Buat password baru</h1>'
+    + '<p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#4a5b54;">'
+    + 'Ada permintaan untuk mengganti password akun Anda di Portal Manajemen RW 26. '
+    + 'Tekan tombol di bawah, lalu buat password baru.</p>'
+    + tombol
+    + '<p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#6b7d75;">'
+    + 'Kalau tombolnya tidak berfungsi, salin tautan ini ke peramban:<br>'
+    + '<span style="color:#0a6c50;word-break:break-all;">' + escapeHtml_(link) + '</span></p>'
+    + '</td></tr>'
+
+    + '<tr><td style="padding:0 28px 24px;">'
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
+    + ' style="background:#fff8e6;border-left:4px solid #e9b949;border-radius:8px;">'
+    + '<tr><td style="padding:14px 16px;font-size:13px;line-height:1.6;color:#5a4a1c;">'
+    + 'Tautan ini berlaku sampai <strong>' + escapeHtml_(jam) + '</strong> dan hanya bisa '
+    + 'dipakai satu kali. Kalau Anda tidak meminta ganti password, abaikan saja email ini '
+    + '- password Anda tidak berubah sampai tautannya benar-benar dipakai.'
+    + '</td></tr></table>'
+    + '</td></tr>'
+
+    + '<tr><td style="padding:18px 28px;background:#f7faf9;border-top:1px solid #e6efeb;'
+    + 'font-size:12px;color:#7d8d86;">'
+    + '&copy; 2026 RW 26 Pengasinan &middot; Rawalumbu'
+    + '</td></tr>'
+
+    + '</table></td></tr></table></body></html>';
+}
+
+// ============================================================================
 //  AUTHENTIKASI MELALUI SUPABASE
 // ============================================================================
 //  Sesi tidak lagi dibuat sendiri. Portal admin login lewat Supabase Auth dan
@@ -412,12 +836,17 @@ function supabaseConfig_() {
  * Pasang kredensial Supabase ke Script Properties.
  * Jalankan SEKALI dari editor Apps Script. Jangan dipanggil lagi setelah
  * terpasang, dan jangan pernah menuliskan nilainya di dalam file ini.
+ *
+ * Parameter keempat (publicBaseUrl) boleh dikosongkan kalau Script Property
+ * PUBLIC_BASE_URL sudah diisi lewat UI. Isi dengan alamat portal TANPA garis
+ * miring di akhir, mis. "https://mgt.rw026.my.id".
  */
-function setupSupabaseConfig_(url, anonKey, serviceRoleKey) {
+function setupSupabaseConfig_(url, anonKey, serviceRoleKey, publicBaseUrl) {
   const props = PropertiesService.getScriptProperties();
   if (url) props.setProperty('SUPABASE_URL', String(url).trim());
   if (anonKey) props.setProperty('SUPABASE_ANON_KEY', String(anonKey).trim());
   if (serviceRoleKey) props.setProperty('SUPABASE_SERVICE_ROLE_KEY', String(serviceRoleKey).trim());
+  if (publicBaseUrl) props.setProperty('PUBLIC_BASE_URL', String(publicBaseUrl).trim().replace(/\/+$/, ''));
   console.log('Konfigurasi Supabase tersimpan. Hapus nilai dari riwayat eksekusi.');
   return 'OK';
 }

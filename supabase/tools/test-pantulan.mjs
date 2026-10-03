@@ -44,7 +44,7 @@ const no = (n, t) => { gagal++; console.log(`    SALAH ${n}\n          ${t}`); }
 /**
  * Ambil fungsi penjaga dari login.html dengan menghitung kurung kurawal.
  *
- * Regex non-greka bel，香港六 inadequate: fungsi ini punya blok try/catch, jadi
+ * Regex non-greedy tidak memadai di sini: fungsi ini punya blok try/catch, jadi
  * pola seperti /function x\(\)\{[\s\S]*?\n\s*\}/ berhenti di kurung penutup
  * blok try - meninggalkan potongan kode yang tidak seimbang dan gagal
  * diparse.
