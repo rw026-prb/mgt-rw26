@@ -97,11 +97,27 @@ window.RW26 = (function () {
     return m ? m[3] + '/' + m[2] + '/' + m[1] : s;
   }
 
-  /** 'DD/MM/YYYY' -> 'YYYY-MM-DD'. Nilai yang diketik user di form kas. */
+  /**
+   * 'DD/MM/YYYY' -> 'YYYY-MM-DD'. Nilai yang diketik user di form kas.
+   *
+   * PERHATIKAN URUTAN. Regex di bawah menangkap:
+   *   m[1] = HARI, m[2] = BULAN, m[3] = TAHUN
+   *
+   * Kolom `tanggal` di tabel kas bertipe date, jadi(PostgreSQL) bentuknya
+   * harus TAHUN-BULAN-HARI. Dua basis penghitungan tidak boleh tertukar:
+   *
+   *   05/10/2026 (5 Oktober) -> 2026-10-05
+   *
+   * Versi lama menulis m[1] sebagai bulan dan m[2] sebagai hari, sehingga
+   * 05/10/2026 tersimpan jadi 2026-05-10. Nilai itu tidak error - Postgres
+   * menerimaanya sebagai 10 Mei - lalu list_kas menampilkannya kembali sebagai
+   * 10/05/2026. Efeknya di layar: tanggal dan bulan seolah bertukar tanpa
+   * ada pesan apa pun. Itu lebih buruk daripada ditolak.
+   */
   function toIsoDate(ddmmyyyy) {
     var m = String(ddmmyyyy || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (!m) return null;
-    return m[3] + '-' + String(m[1]).padStart(2, '0') + '-' + String(m[2]).padStart(2, '0');
+    return m[3] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[1]).padStart(2, '0');
   }
 
   /** timestamptz -> 'DD/MM/YYYY HH:MM' (bentuk yang dulu dipakai sheet). */

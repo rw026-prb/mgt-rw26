@@ -192,6 +192,12 @@ function doPost(e) {
       case 'checkPasswordResetToken': return checkPasswordResetToken_(body);
       case 'resetPassword': return resetPassword_(body);
 
+      // ---- Pemeriksaan email (Super Admin) ----
+      //  Berbeda dari tiga aksi di atas, ini mengembalikan kesalahan apa adanya.
+      //  Amannya tetap: butuh sesi Super Admin dan hanya mengirim ke email
+      //  miliknya sendiri.
+      case 'tesKirimResetEmail': return tesKirimResetEmail_(body);
+
       // ---- Upload foto untuk modul yang datanya ada di Supabase ----
       case 'uploadDriveImage': return uploadDriveImage_(body);
 
@@ -595,17 +601,118 @@ function requestPasswordReset_(body) {
 
   const link = publicBaseUrl_() + '/update-password.html?token=' + encodeURIComponent(token);
 
+  let terkirim = false;
   try {
     kirimResetEmail_(email, link, kedaluwarsa);
+    terkirim = true;
   } catch (e) {
-    // Sengaja ditelan. Lihat aturan ke-3 di kepala modul ini: menampilkan
-    // kegagalan kirim akan membedakan email terdaftar dari tidak
+    // Sengaja ditelan UNTUK PERAMBAN. Lihat aturan ke-3 di kepala modul ini:
+    // menampilkan kegagalan kirim akan membedakan email terdaftar dari tidak
     // terdaftar, tepat ketika kuota MailApp sedang habis.
-    console.error('GAGAK KIRIM reset ke ' + email + ' (token tetap berlaku): ' + e.message);
+    //
+    // Dicatat ke activity_log supaya Super Admin bisa melihat penyebabnya di
+// portal. Tanpa ini, kegagalan MailApp tidak bisa dibedakan dari "email
+    // masuk spam" hanya dari sisi server - dan satu-satunya cara yang tersisa
+    // adalah menebak. activity_log hanya bisa dibaca Super Admin dan hanya
+    // tertulis bila emailnya memang terdaftar, jadi ini tidak menambah
+    // informasi apa pun ke penyerang.
+    //
+    // Alasan yang paling sering muncul di sini:
+    //   - "Daily quota exceeded"  -> kuota MailApp akun habis (100/hari
+    //                                untuk @gmail.com biasa, 1500/hari untuk
+    //                                Google Workspace)
+    //   - "Authorization is required to perform that action"
+    //                              -> proyek Apps Script belum pernah di-Run
+    //                                 di editor setelah MailApp ditambahkan,
+    //                                 sehingga scope script.send_mail belum
+    //                                 diotorisasi. Perbaiki dari editor.
+    const alasan = String((e && e.message) || e);
+    console.error('GAGAL KIRIM reset ke ' + email + ' (token tetap berlaku): ' + alasan);
+    logActivity_(null, 'reset', 'users', 'GAGAL KIRIM link reset ke ' + email + ' - ' + alasan);
+
+    // Cooldown dilepas supaya orang bisa langsung mencoba lagi, bukan menunggu
+    // 60 detik untuk jawaban "sudah kami kirim" yang tetap salah. Tanpa ini,
+    // satu kegagalan membuat dua percobaan berikutnya ditolak diam-diam.
+    try { CacheService.getScriptCache().remove(kunciCooldown); } catch (e2) {
+      console.warn('pelepasan cooldown gagal: ' + e2.message);
+    }
   }
 
-  logActivity_(null, 'reset', 'users', 'Mengirim link reset password ke ' + email);
+  logActivity_(null, 'reset', 'users', (terkirim ? 'Mengirim' : 'Meminta')
+    + ' link reset password ke ' + email);
   return json_({ ok: true, message: pesanResetUmum_() });
+}
+
+/**
+ * Coba kirim satu email percobaan dan laporkan hasilnya apa adanya.
+ *
+ * Hanya untuk Super Admin, dan hanya ke email miliknya sendiri. Tujuannya
+ * menjawab satu pertanyaan yang tidak bisa dijawab alur reset biasa: apakah
+ * MailApp benar-benar bisa mengirim, atau gagal karena kuota harian habis /
+ * scope script.send_mail belum diotorisasi.
+ *
+ * Kenapa galat di sini boleh dikembalikan, sedangkan di requestPasswordReset_
+ * tidak: pemanggilnya Super Admin yang sudah login dan alamatnya adalah
+ * alamatnya sendiri. Tidak ada informasi soal email warga lain yang bisa
+ * bocor. Alur reset email warga sendiri tetap dijawab "dikirim" apa pun
+ * hasilnya.
+ */
+function tesKirimResetEmail_(body) {
+  // body undefined HANYA kalau fungsi ini dijalankan dari tombol Run di editor
+  // Apps Script (editor tidak mengirim argumen). Tanpa guard di sini hasilnya
+  // TypeError yang tidak menjelaskan apa pun.
+  const b = body || {};
+  const actor = requireSupabaseUser_(b.token);
+  if (actor.role !== 'Super Admin') {
+    throw new Error('Hanya Super Admin yang dapat menjalankan pemeriksaan ini.');
+  }
+  const email = String((actor && actor.email) || '').trim();
+  if (!email) throw new Error('Email akun ini tidak terbaca.');
+
+  const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
+  const link = publicBaseUrl_() + '/update-password.html?token=dianjikan-untuk-periksa';
+
+  try {
+    kirimResetEmail_(email, link, kedaluwarsa);
+    return json_({ ok: true, message: 'Email percobaan terkirim ke ' + email + '. Periksa kotak masuk dan folder spam.' });
+  } catch (e) {
+    throw new Error('Gagal mengirim: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+/**
+ * Cek apakah MailApp benar-benar bisa mengirim, TANPA login dan TANPA token.
+ *
+ * Fungsi ini sengaja dibuat bisa dijalankan langsung dari editor Apps Script
+ * (pilih di dropdown fungsi, lalu klik Run). Tujuannya satu: melihat
+ * kesalahan MailApp apa adanya di layar, karena alur reset password memang
+ * tidak boleh membocorkan kegagalan itu ke pemanggil.
+ *
+ * Email tujuan dibaca dari Script Property UJI_EMAIL. Kalau kosong, memakai
+ * email pemilik proyek Apps Script.
+ */
+function ujiKirimEmail() {
+  const props = PropertiesService.getScriptProperties();
+  const ke = String(props.getProperty('UJI_EMAIL') || '').trim()
+    || String(Session.getEffectiveUser().getEmail() || '').trim();
+  if (!ke) {
+    throw new Error('Email tujuan kosong. Isi Script Property UJI_EMAIL, atau jalankan dari akun Gmail.');
+  }
+
+  const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
+  const link = publicBaseUrl_() + '/update-password.html?token=uji-coba';
+
+  try {
+    kirimResetEmail_(ke, link, kedaluwarsa);
+    Logger.log('BERHASIL: email percobaan terkirim ke ' + ke);
+    return 'BERHASIL: email percobaan terkirim ke ' + ke
+      + '. Periksa kotak masuk dan folder spam.';
+  } catch (e) {
+    const pesan = String((e && e.message) || e);
+    // Ditampilkan apa adanya, ini memang tujuannya.
+    Logger.log('GAGAL: ' + pesan);
+    throw new Error('GAGAL kirim ke ' + ke + ': ' + pesan);
+  }
 }
 
 /** Periksa token sebelum menampilkan formulir password baru. */
