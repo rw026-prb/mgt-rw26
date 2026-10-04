@@ -225,6 +225,30 @@ function doPost(e) {
 //    - membuat akun
 //    - menghapus akun
 //    - mengganti email / password
+/**
+ * Panggil Supabase lewat service_role.
+ *
+ * PENTING - kenapa header Prefer selalu dikirimkan:
+ * ----------------------------------------------------
+ * PostgREST membalas 204 No Content untuk PATCH/POST/PUT/DELETE yang tidak
+ * meminta apa-apa. Damages itu diam-diam: pemanggil yang满怀希望 pada baris
+ * yang dikembalikan akan menerima `{}`, dan karena `{}` itu benar
+ * (bukan error), kode lanjut ke cabang "data tidak ditemukan".
+ *
+ * Contoh nyata yang pernah merusak reset password:
+ *
+ *     const diklaim = supabaseAdmin_('patch', '/rest/v1/password_reset_tokens?...');
+ *     if (!Array.isArray(diklaim) || !diklaim.length) throw new Error('token tidak berlaku');
+ *
+ * PATCH-nya SUKSES - token sudah ditandai terpakai di database - tapi responsnya
+ * kosong, jadi kodenya melempar "token tidak berlaku". Efeknya: setiap reset
+ * gagal padahal tokennya benar, DAN token yang barusan diklaim ikut hangus
+ * sehingga percobaan berikutnya juga ditolak.
+ *
+ * `return=representation` memaksa PostgREST mengembalikan baris yang terdampak.
+ * Header ini diabaikan oleh GET dan oleh DELETE yang memang tidak mengembalikan
+ * apa pun, jadi aman dipasang di sini untuk semua method.
+ */
 function supabaseAdmin_(method, path, payload) {
   const cfg = supabaseConfig_();
   if (!cfg.url || !cfg.serviceRoleKey) {
@@ -235,7 +259,9 @@ function supabaseAdmin_(method, path, payload) {
     headers: {
       apikey: cfg.serviceRoleKey,
       Authorization: 'Bearer ' + cfg.serviceRoleKey,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      // Tanpa baris ini, PATCH/POST/PUT membalas 204 dengan body kosong.
+      Prefer: 'return=representation'
     },
     muteHttpExceptions: true
   };
@@ -670,14 +696,41 @@ function tesKirimResetEmail_(body) {
   if (!email) throw new Error('Email akun ini tidak terbaca.');
 
   const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
-  const link = publicBaseUrl_() + '/update-password.html?token=dianjikan-untuk-periksa';
 
+  // PENTING: email uji TIDAK memakai tautan reset sungguhan.
+  //
+  // Token di bawah ini tidak pernah dimasukkan ke password_reset_tokens, jadi
+  // kalau tautannya diklik, checkPasswordResetToken_ pasti menolaknya dengan
+  // "Token Tidak Valid". Itu bukan bug - itu konsekuensi token palsu, dan
+  // persis membingungkan orang yang sedang mencari tahu apakah alurnya rusak.
+  //
+  // Karena itu email uji sengaja dibuat terlihat berbeda: subjeknya ditandai,
+  // dan isinya mengatakan terus terang bahwa tautannya tidak berlaku. Email
+  // ini hanya membuktikan MailApp bisa mengirim - tidak untuk dicoba dipakai.
   try {
-    kirimResetEmail_(email, link, kedaluwarsa);
-    return json_({ ok: true, message: 'Email percobaan terkirim ke ' + email + '. Periksa kotak masuk dan folder spam.' });
+    kirimEmailUji_(email);
+    return json_({ ok: true, message: 'Email PERCOBAAN terkirim ke ' + email
+      + '. Email ini bukan permintaan reset - tombolnya sengaja tidak berlaku. '
+      + 'Cek folder spam. Untuk menguji alur sebenarnya, minta link reset dari halaman login.' });
   } catch (e) {
     throw new Error('Gagal mengirim: ' + (e && e.message ? e.message : String(e)));
   }
+}
+
+/**
+ * Email percobaan. Sengaja TIDAK memakai emailResetHtml_ dan tidak memuat
+ * tautan reset, supaya mustahil disalahartikan sebagai link yang bisa dipakai.
+ */
+function kirimEmailUji_(email) {
+  MailApp.sendEmail({
+    to: email,
+    subject: '[PERCOBAAN] Tes kirim email - Portal RW 26 (abaikan)',
+    body: 'Ini email percobaan otomatis, BUKAN permintaan ganti password.\n\n'
+      + 'Tujuannya hanya memeriksa apakah server able mengirim email.\n'
+      + 'Tidak ada yang perlu Anda lakukan, dan tidak ada tautan yang bisa dipakai di sini.\n\n'
+      + 'Kalau Anda menerima email seperti ini tanpa memintanya, abaikan saja.',
+    name: RESET_SENDER_NAMA
+  });
 }
 
 /**
@@ -699,20 +752,111 @@ function ujiKirimEmail() {
     throw new Error('Email tujuan kosong. Isi Script Property UJI_EMAIL, atau jalankan dari akun Gmail.');
   }
 
-  const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
-  const link = publicBaseUrl_() + '/update-password.html?token=uji-coba';
-
+  // Email uji TIDAK memuat tautan reset. Token percobaan tidak pernah masuk
+  // password_reset_tokens, jadi tautannya pasti ditolak dengan "Token Tidak
+  // Valid" - dan itu terlihat seperti alur reset rusak padahal tidak. Email
+  // uji hanya boleh membuktikan satu hal: MailApp bisa mengirim.
   try {
-    kirimResetEmail_(ke, link, kedaluwarsa);
+    kirimEmailUji_(ke);
     Logger.log('BERHASIL: email percobaan terkirim ke ' + ke);
     return 'BERHASIL: email percobaan terkirim ke ' + ke
-      + '. Periksa kotak masuk dan folder spam.';
+      + '. Periksa kotak masuk dan folder spam. Ini email PERCOBAAN, bukan permintaan reset.';
   } catch (e) {
     const pesan = String((e && e.message) || e);
     // Ditampilkan apa adanya, ini memang tujuannya.
     Logger.log('GAGAL: ' + pesan);
     throw new Error('GAGAL kirim ke ' + ke + ': ' + pesan);
   }
+}
+
+/**
+ * Periksa apakah alur reset bisa bekerja dari ujung ke ujung, TANPA mengirim
+ * email dan TANPA mengubah password siapa pun.
+ *
+ * Jalankan dari editor Apps Script (pilih di dropdown, klik Run), dengan
+ * Script Property UJI_EMAIL diisi email yangDIETAHUI terdaftar.
+ *
+ * Yang diperiksa satu per satu, dengan alasan kalau gagal:
+ *   1. apakah email itu terdaftar dan aktif (RPC cari_user_id_by_email)
+ *   2. apakah token bisa diterbitkan ke database
+ *   3. apakah token itu bisa dibaca kembali lewat checkPasswordResetToken_
+ *   4. apakah tabelnya bisa ditulis sama sekali
+ *
+ * Token yang diterbitkan di sini langsung dibatalkan lagi di akhir, supaya
+ * tidak meninggalkan token hidup yang tidak diketahui pemiliknya.
+ */
+function ujiAlurReset() {
+  const props = PropertiesService.getScriptProperties();
+  const email = String(props.getProperty('UJI_EMAIL') || '').trim().toLowerCase();
+  if (!email) {
+    throw new Error('Isi Script Property UJI_EMAIL dengan email yang terdaftar, lalu jalankan lagi.');
+  }
+
+  const cfg = supabaseConfig_();
+  if (!cfg.url || !cfg.serviceRoleKey) {
+    throw new Error('Konfigurasi Supabase belum dipasang. Jalankan setupSupabaseConfig_().');
+  }
+
+  // 1. Email terdaftar?
+  let userId = null;
+  try {
+    userId = supabaseRpc_(cfg, 'cari_user_id_by_email', { p_email: email }) || null;
+  } catch (e) {
+    throw new Error('LANGKAH 1 GAGAL - RPC cari_user_id_by_email: ' + e.message
+      + '\nKemungkinan migrasi 0009_reset_password_sendiri.sql belum dijalankan di database.');
+  }
+  if (!userId) {
+    throw new Error('LANGKAH 1 GAGAL - email "' + email + '" tidak terdaftar atau statusnya bukan Aktif.\n'
+      + 'Cocokkan email ini dengan yang tertera di auth.users. Password residents tidak tersimpan di tabel profiles.');
+  }
+  Logger.log('Langkah 1 OK: email terdaftar, user_id=' + userId);
+
+  // 2. Terbitkan token.
+  const token = tokenResetAcak_();
+  const kedaluwarsa = new Date(Date.now() + RESET_TOKEN_MENIT * 60000).toISOString();
+  let baris = null;
+  try {
+    baris = supabaseAdmin_('post', '/rest/v1/password_reset_tokens?select=id', {
+      user_id: userId,
+      token_hash: hashToken_(token),
+      tanggal_kedaluwarsa: kedaluwarsa
+    });
+  } catch (e) {
+    throw new Error('LANGKAH 2 GAGAL - tidak bisa menulis ke password_reset_tokens: ' + e.message
+      + '\nKemungkinan tabelnya belum ada, atau GRANT untuk service_role belum dijalankan.');
+  }
+  Logger.log('Langkah 2 OK: token diterbitkan');
+
+  try {
+    // 3. Token bisa dibaca kembali? Ini persis jalur yang dipakai update-password.html.
+    const rows = supabaseAdmin_('get',
+      '/rest/v1/password_reset_tokens?select=user_id,tanggal_kedaluwarsa'
+      + '&token_hash=eq.' + encodeURIComponent(hashToken_(token))
+      + '&tanggal_dipakai=is.null'
+      + '&tanggal_kedaluwarsa=gt.' + encodeURIComponent(new Date().toISOString()));
+
+    if (!Array.isArray(rows) || !rows.length) {
+      throw new Error('LANGKAH 3 GAGAL - token baru diterbitkan tapi tidak bisa dibaca kembali.\n'
+        + 'Ini berarti hash atau filter tanggalnya tidak cocok - alur reset akan selalu gagal.');
+    }
+    Logger.log('Langkah 3 OK: token bisa dibaca kembali');
+    Logger.log('Hash token (64 hex, cocok dengan yang tersimpan): ' + hashToken_(token));
+  } finally {
+    // 4. Batalkan token uji, apa pun hasilnya.
+    try {
+      supabaseAdmin_('patch',
+        '/rest/v1/password_reset_tokens?token_hash=eq.' + encodeURIComponent(hashToken_(token)),
+        { tanggal_dipakai: new Date().toISOString() });
+      Logger.log('Token uji sudah dibatalkan.');
+    } catch (e) {
+      Logger.log('PERINGATAN: token uji gagal dibatalkan: ' + e.message);
+    }
+  }
+
+  return 'ALUR RESET SEHAT.\n'
+    + 'Token bisa diterbitkan, dibaca, dan dibatalkan.\n'
+    + 'Kalau reset dari halaman login tetap gagal, masalahnya ada di sisi penyampaian email '
+    + '(spam/quota), bukan di token.';
 }
 
 /** Periksa token sebelum menampilkan formulir password baru. */
@@ -767,7 +911,10 @@ function resetPassword_(body) {
   // kedaluwarsa.
   const sekarang = new Date().toISOString();
   const diklaim = supabaseAdmin_('patch',
-    '/rest/v1/password_reset_tokens?token_hash=eq.' + encodeURIComponent(hashToken_(token))
+    // id ikut diminta karena baris hasil klaim dikembalikan ke pemanggil
+    // (dipakai untuk membatalkan klaim bila ada masalah setelahnya).
+    '/rest/v1/password_reset_tokens?select=id,user_id'
+    + '&token_hash=eq.' + encodeURIComponent(hashToken_(token))
     + '&tanggal_dipakai=is.null'
     + '&tanggal_kedaluwarsa=gt.' + encodeURIComponent(sekarang),
     { tanggal_dipakai: sekarang });
@@ -778,18 +925,46 @@ function resetPassword_(body) {
   }
   const userId = baris.user_id;
 
-  try {
-    supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(userId), { password: password });
-  } catch (e) {
-    // Token sudah diklaim tapi password gagal diganti. Kembalikan klaimnya,
-    // kalau tidak orang yang benar-benar punya akses ke mailbox ikut
-    // kehilangan haknya karena masalah server.
+/**
+   * Kembalikan klaim token kalau ada masalah setelahnya.
+   *
+   * Dipakai sedemikian rupa karena ada dua jenis kegagalan yang harus dibedakan
+   * oleh pemanggil:
+   *
+   *   - "password gagal diganti" -> kembalikan klaimnya, supaya orang yang
+   *     benar-benar punya akses ke mailbox tidak kehilangan haknya karena
+   *     masalah server.
+   *   - "respons server tidak seperti yang diharapkan" -> token SUDAH tercatat
+   *     terpakai di database, padahal kodenya belum sempat mengganti password.
+   *     Kalau dibiarkan begitu, orang tersebut tidak bisa lagi memakai tautan
+   *     yang sama dan harus meminta link baru.
+   *
+   * Baris `id` dibutuhkan di sini, jadi select harus menyertakannya. Itu
+   * bergantung pada PostgREST mengembalikan baris yang terpengaruh, lewat
+   * `Prefer: return=representation` di supabaseAdmin_.
+   */
+  const kembalikanKlaim = function (alasan) {
     try {
       supabaseAdmin_('patch', '/rest/v1/password_reset_tokens?id=eq.' + encodeURIComponent(baris.id),
         { tanggal_dipakai: null });
     } catch (e2) {
       console.error('GAGAL membatalkan klaim token untuk ' + userId + ': ' + e2.message);
     }
+    console.error('Klaim token dikembalikan untuk ' + userId + ': ' + alasan);
+  };
+
+  // Yakin baris yang diklaim benar-benar punya id. Tanpa ini, kembalikanKlaim
+  // akan memakai `undefined` dan membatalkan klaim baris yang SALAH - atau
+  // tidak membatalkan apa pun sama sekali.
+  if (!baris.id) {
+    kembalikanKlaim('baris hasil PATCH tidak memuat id');
+    throw new Error('Permintaan gagal diproses. Minta link reset yang baru dari halaman login.');
+  }
+
+  try {
+    supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(userId), { password: password });
+  } catch (e) {
+    kembalikanKlaim(e.message);
     throw e;
   }
 

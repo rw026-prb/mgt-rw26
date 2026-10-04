@@ -459,7 +459,7 @@
 
     <section class="page" id="statistik"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">DATA WARGA</div><h1 class="page-title h3">Statistik Warga</h1><p class="text-secondary mb-0">Kelola data statistik warga RW 26 secara dinamis.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshStatistik"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#statistikModal" onclick="bukaFormStatistik()"><i class="bi bi-plus-lg me-2"></i>Tambah Data</button></div></div><div class="alert alert-danger d-none" id="statistikError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th class="text-center" style="width:50px">No</th><th>Nama Kategori</th><th class="text-end">Nilai</th><th>Keterangan</th><th class="text-end">Aksi</th></tr></thead><tbody id="statistikTable"><tr><td colspan="5" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data statistik...</td></tr></tbody></table></div></div></div></section>
 
-    <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>No HP</th><th>Role</th><th>Wilayah</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr></tbody></table></div></div></div></section>
+    <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>Email</th><th>No HP</th><th>Role</th><th>Wilayah</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="10" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr></tbody></table></div></div></div></section>
 
     <section class="page" id="visitor">
       <div class="d-flex flex-wrap justify-content-between gap-3 mb-4">
@@ -761,7 +761,7 @@
       document.getElementById('userTable').innerHTML = users.length?users.map(u=>{
         const active=u.status==='Aktif';
         const canEdit = actorRole === 'Super Admin' || u.role !== 'Super Admin';
-        return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.email)}</small></div></div></td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td>${esc(u.wilayah)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap">${canEdit?`<button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button>`:''}</td></tr>`}).join(''):'<tr><td colspan="9" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>';
+        return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.wilayah)}</small></div></div></td><td class="text-nowrap small">${u.email?esc(u.email):'<span class="text-secondary">-</span>'}</td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td>${esc(u.wilayah)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap">${canEdit?`<button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button>`:''}</td></tr>`}).join(''):'<tr><td colspan="10" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>';
     }
     /**
      * Tunda pemanggilan fn sampai pemanggil berhenti sebentar.
@@ -795,6 +795,26 @@
     function _apiCacheGet(key){try{const raw=sessionStorage.getItem(key);if(!raw)return undefined;const o=JSON.parse(raw);if(Date.now()-o.t>_apiCacheTtl){sessionStorage.removeItem(key);return undefined;}return o.d;}catch(e){return undefined;}}
     function _apiCacheSet(key,data){try{sessionStorage.setItem(key,JSON.stringify({t:Date.now(),d:data}));}catch(e){}}
     function _apiCacheClear(){try{Object.keys(sessionStorage).filter(k=>k.indexOf('rw26cache_')===0).forEach(k=>sessionStorage.removeItem(k));}catch(e){}}
+
+/**
+ * Jalankan ulang sebuah pemuat dengan mengabaikan cache baca.
+ *
+ * Tombol "Segarkan" memanggil apiRequest() yang biasa, dan apiRequest()
+ * menyetor hasil baca ke sessionStorage selama 2 menit. Akibatnya menekan
+ * Segarkan hanya mengembalikan salinan yang sama dari cache - tabel tidak
+ * berubah sama sekali, dan tombolnya terlihat rusak padahal tidak error.
+ *
+ * Cache dibuang di sini, bukan di dalam tiap pemuat, supaya tidak ada tombol
+ * Segarkan yang lupa memanggilnya.
+ */
+async function segarkan(pemuat){
+  _apiCacheClear();
+  try {
+    await pemuat();
+  } catch(e){
+    toast(e && e.message ? e.message : 'Gagal memuat data.', true);
+  }
+}
     /**
  * Satu-satunya jalan keluar dari portal menuju server.
  *
@@ -849,7 +869,7 @@ async function apiRequest(action, payload = {}) {
 }
 
     async function withLoading(errorId, targetId, loadingHtml, action){const error=document.getElementById(errorId);error?.classList.add('d-none');if(targetId)document.getElementById(targetId).innerHTML=loadingHtml;try{return await action();}catch(err){if(error){error.textContent=err.message;error.classList.remove('d-none');}throw err;}}
-    async function loadUsers(){const error=document.getElementById('userError');error.classList.add('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr>';try{const data=await apiRequest('listUsers');users=data.users;renderUsers();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="9" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
+    async function loadUsers(){const error=document.getElementById('userError');error.classList.add('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="10" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr>';try{const data=await apiRequest('listUsers');users=data.users;renderUsers();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('userTable').innerHTML='<tr><td colspan="10" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
     async function loadHimbauan(){const error=document.getElementById('himbauanError');error.classList.add('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center p-4"><span class="spinner-border spinner-border-sm me-2"></span>Memuat slide himbauan...</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr>';try{const data=await apiRequest('listHimbauan');himbauans=data.himbauan;renderHimbauan();}catch(err){error.textContent=err.message;error.classList.remove('d-none');document.getElementById('himbauanSliderWrap').innerHTML='<div class="himbauan-empty text-center text-danger p-4">Slide himbauan tidak dapat dimuat.</div>';document.getElementById('himbauanTable').innerHTML='<tr><td colspan="6" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}}
     function sortByDateDesc(a,b){const[d1,m1,y1]=(a.tanggal||'').split(/[/-]/);const[d2,m2,y2]=(b.tanggal||'').split(/[/-]/);return(y2||0)-(y1||0)||(m2||0)-(m1||0)||(d2||0)-(d1||0);}
     async function loadAnnouncements(){try{await withLoading('announcementError','announcementTable','<tr><td colspan="6" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat pengumuman...</td></tr>',async()=>{const data=await apiRequest('listAnnouncements');announcements=data.announcements.sort(sortByDateDesc);renderAnnouncements();});}catch{document.getElementById('announcementTable').innerHTML='<tr><td colspan="6" class="text-center text-danger py-5">Data tidak dapat dimuat.</td></tr>';}updateDashboardStats();}
@@ -1542,19 +1562,22 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
       finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-check2-circle me-2"></i>Simpan Perubahan';}
     };
     document.getElementById('logoutButton').onclick=()=>logout();
-    document.getElementById('refreshUsers').onclick=loadUsers;
-    document.getElementById('refreshHimbauan').onclick=loadHimbauan;
-    document.getElementById('refreshAnnouncements').onclick=loadAnnouncements;
-    document.getElementById('refreshNews').onclick=loadNews;
-    document.getElementById('refreshFacilities').onclick=loadFacilities;
-    document.getElementById('refreshOrg').onclick=loadOrganization;
+    // Semua tombol "Segarkan" memakai segarkan(), bukan memanggil pemuat secara
+    // langsung - supaya cache baca 2 menit ikut dibuang. Tanpa itu tombolnya
+    // hanya mengembalikan data yang sama dan terlihat tidak berfungsi.
+    document.getElementById('refreshUsers').onclick=()=>segarkan(loadUsers);
+    document.getElementById('refreshHimbauan').onclick=()=>segarkan(loadHimbauan);
+    document.getElementById('refreshAnnouncements').onclick=()=>segarkan(loadAnnouncements);
+    document.getElementById('refreshNews').onclick=()=>segarkan(loadNews);
+    document.getElementById('refreshFacilities').onclick=()=>segarkan(loadFacilities);
+    document.getElementById('refreshOrg').onclick=()=>segarkan(loadOrganization);
     document.getElementById('refreshKas').onclick=refreshKas;
-    document.getElementById('refreshStatistik').onclick=loadStatistik;
+    document.getElementById('refreshStatistik').onclick=()=>segarkan(loadStatistik);
     document.getElementById('statistikForm').onsubmit=async e=>{e.preventDefault();await simpanStatistik(e.target);};
-    document.getElementById('refreshVisitor').onclick=()=>{vPage=1; loadVisitor(true);};
-    document.getElementById('refreshGallery').onclick=loadGalleryAlbums;
-    document.getElementById('refreshVideo').onclick=loadVideo;
-    document.getElementById('refreshVideoKegiatan').onclick=loadVideoKegiatan;
+    document.getElementById('refreshVisitor').onclick=()=>segarkan(()=>{vPage=1; return loadVisitor(true);});
+    document.getElementById('refreshGallery').onclick=()=>segarkan(loadGalleryAlbums);
+    document.getElementById('refreshVideo').onclick=()=>segarkan(loadVideo);
+    document.getElementById('refreshVideoKegiatan').onclick=()=>segarkan(loadVideoKegiatan);
     document.getElementById('btnBackToAlbums').onclick=closeAlbumView;
     document.getElementById('breadcrumbAlbums').addEventListener('click',e=>{e.preventDefault();closeAlbumView();});
     document.getElementById('kasForm').onsubmit=async e=>{e.preventDefault();await simpanKas(e.target);};

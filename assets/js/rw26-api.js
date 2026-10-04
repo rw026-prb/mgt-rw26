@@ -120,18 +120,60 @@ window.RW26 = (function () {
     return m[3] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[1]).padStart(2, '0');
   }
 
-  /** timestamptz -> 'DD/MM/YYYY HH:MM' (bentuk yang dulu dipakai sheet). */
+  /**
+   * timestamptz -> 'DD/MM/YYYY HH:MM' dalam waktu Indonesia (WIB, UTC+7).
+   *
+   * BUG YANG DIPERBAIKI DI SINI
+   * --------------------------
+   * Versi lama menggeser waktu secara manual:
+   *
+   *     var o = d.getTimezoneOffset() * 60000;
+   *     var l = new Date(d.getTime() - o - 7 * 3600000);
+   *     l.getUTCDate() ...
+   *
+   * Dua masalah bertumpuk:
+   *
+   * 1. `getTimezoneOffset()` sudahemove offset lokal, lalu `- 7 * 3600000`
+   *    menggeser 7 jam LAGI. Untuk pengguna yang browsernya sudah di WIB,
+   *    offset-nya -420 menit (= -7 jam), jadi total geserannya 14 jam. Jam 23.30
+   *    WIB became 09.30 dua hari kemudian.
+   *
+   * 2. Nilai yang benar bergantung pada tempat peramban berada. Admin yang
+   *    membuka portal dari komputer di WIB dan dari komputer di UTC akan
+   *    melihat angka berbeda untuk baris yang sama - dan tidak ada yang bisa
+   *   .managementkan mana yang benar.
+   *
+   * Sekarang konversinya diserahkan ke timeZone bawaan peramban
+   * (Asia/Jakarta), yang selalu menghasilkan WIB apa pun lokasi peramban.
+   */
   function toTanggalWaktu(iso) {
     if (!iso) return '-';
     var d = new Date(iso);
     if (isNaN(d.getTime())) return '-';
-    var o = d.getTimezoneOffset() * 60000;
-    var l = new Date(d.getTime() - o - 7 * 3600000);
-    return String(l.getUTCDate()).padStart(2, '0') + '/'
-      + String(l.getUTCMonth() + 1).padStart(2, '0') + '/'
-      + l.getUTCFullYear() + ' '
-      + String(l.getUTCHours()).padStart(2, '0') + ':'
-      + String(l.getUTCMinutes()).padStart(2, '0');
+    try {
+      // id-ID menghasilkan HH.mm, jadi jamnya dirakit sendiri dari bagian jam
+      // dan menit supaya formatnya persis 'HH:MM' seperti yang dipakai portal.
+      var bagian = new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      }).formatToParts(d);
+      var ambil = function (tipe) {
+        for (var i = 0; i < bagian.length; i++) {
+          if (bagian[i].type === tipe) return bagian[i].value;
+        }
+        return '';
+      };
+      var jam = ambil('hour');
+      // locale id-ID bisa menuliskan midnight sebagai "24" - ubah ke "00".
+      if (jam === '24') jam = '00';
+      return ambil('day') + '/' + ambil('month') + '/' + ambil('year')
+        + ' ' + jam + ':' + ambil('minute');
+    } catch (e) {
+      // Peramban lama tanpa Dukungan timeZone: tetap tampilkan apa adanya
+      // daripada membuat kolom kosong.
+      return d.toISOString().slice(0, 16).replace('T', ' ').replace(/-/g, '/');
+    }
   }
 
   function driveThumb(fileId, size) {
@@ -201,11 +243,29 @@ window.RW26 = (function () {
     };
   }
 
-  function mapUser(r, emailById) {
+  /**
+   * Bentuk lama satu baris profiles untuk index.html.
+   *
+   * `emailByLegacyId` diisi dari hasil RPC list_users_dengan_email(). Emailnya
+   * dibaca pakai legacy_id (mis. "RW-0001"), bukan id uuid, supaya konsisten
+   * dengan kunci yang dibuat pemanggil.
+   *
+   * Kalau peta tidak diberikan, pakai kolom `email` di baris itu sendiri kalau
+   * ada. Itu penting untuk updateMyProfile: baris hasil RPC tidak memuat email,
+   * dan tanpa fallback ini session.user.email jadi kosong setiap kali profil
+   * disimpan - field email di form profil ikut terkosongkan.
+   */
+  function mapUser(r, emailByLegacyId) {
+    var email = '';
+    if (r && r.email) {
+      email = r.email;
+    } else if (emailByLegacyId && r && r.legacy_id) {
+      email = emailByLegacyId[r.legacy_id] || '';
+    }
     return {
       userId: r.legacy_id,
       nama: r.nama,
-      email: emailById ? (emailById[r.id] || '') : '',
+      email: email,
       noHp: r.no_hp || '',
       role: r.role,
       wilayah: r.wilayah,
@@ -246,17 +306,35 @@ window.RW26 = (function () {
     },
 
     async listUsers() {
-      var rows = unwrap(await supabase().from('profiles')
-        .select('*').order('legacy_id', { ascending: true }));
+      // Email TIDAK ada di tabel profiles - yang menyimpannya adalah
+      // auth.users, dan tabel itu tidak bisa dibaca langsung dari browser
+      // memakai kunci anon. Karena itu daftar diambil lewat RPC
+      // list_users_dengan_email(), yang menjoin keduanya di sisi database.
+      //
+      // Sebelumnya email di sini SELALU kosong: tidak ada permintaan email
+      // sama sekali, `emails` langsung diisi objek kosong. Kolomnya kosong di
+      // layar, bukan karena datanya tidak ada.
+      //
+      // Kalau RPC-nya belum ada di database, daftar TETAP dimuat tanpa email -
+      // email yang hilang lebih baik daripada seluruh halaman управления user
+      // ikut gagal.
+      var rows = [];
       var emails = {};
       try {
-        // Email tidak ada di tabel profiles (yang tersimpan di auth.users).
-        // RLS hanya mengizinkan Super Admin yang bisa membacanya lewat
-        // profiles; jadi kalau gagal, email ditampilkan kosong daripada
-        // membuat seluruh daftar gagal dimuat.
-        emails = {};
-      } catch (e) { emails = {}; }
-      return { ok: true, users: (rows || []).map(function (r) { return mapUser(r, emails); }) };
+        rows = unwrap(await supabase().rpc('list_users_dengan_email')) || [];
+        var byId = {};
+        rows.forEach(function (r) { byId[r.legacy_id] = r.email || ''; });
+        emails = byId;
+      } catch (e) {
+        console.warn('list_users_dengan_email gagal, email ditampilkan kosong: ' + e.message);
+        try {
+          rows = unwrap(await supabase().from('profiles')
+            .select('*').order('legacy_id', { ascending: true })) || [];
+        } catch (e2) {
+          throw e2;
+        }
+      }
+      return { ok: true, users: rows.map(function (r) { return mapUser(r, emails); }) };
     },
 
     // ======================= HIMBAUAN =======================
@@ -623,7 +701,11 @@ window.RW26 = (function () {
         var r = await supabase().auth.updateUser({ password: String(f.newPassword) });
         if (r.error) throw new Error('Gagal mengganti password: ' + r.error.message);
       }
-      return { ok: true, message: 'Profil berhasil diperbarui.', user: mapUser(row) };
+      // Email tidak ada di baris hasil RPC (tinggalnya di auth.users). Tanpa
+      // injecting ulang, session.user.email jadi kosong dan field email di form
+      // profil terkosongkan setiap kali profil disimpan.
+      var profilBaru = mapUser(Object.assign({}, row, { email: (profile && profile.email) || '' }));
+      return { ok: true, message: 'Profil berhasil diperbarui.', user: profilBaru };
     }
   };
 
