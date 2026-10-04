@@ -459,7 +459,7 @@
 
     <section class="page" id="statistik"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">DATA WARGA</div><h1 class="page-title h3">Statistik Warga</h1><p class="text-secondary mb-0">Kelola data statistik warga RW 26 secara dinamis.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshStatistik"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#statistikModal" onclick="bukaFormStatistik()"><i class="bi bi-plus-lg me-2"></i>Tambah Data</button></div></div><div class="alert alert-danger d-none" id="statistikError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th class="text-center" style="width:50px">No</th><th>Nama Kategori</th><th class="text-end">Nilai</th><th>Keterangan</th><th class="text-end">Aksi</th></tr></thead><tbody id="statistikTable"><tr><td colspan="5" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data statistik...</td></tr></tbody></table></div></div></div></section>
 
-    <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>Email</th><th>No HP</th><th>Role</th><th>Wilayah</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="10" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr></tbody></table></div></div></div></section>
+    <section class="page" id="users"><div class="d-flex flex-wrap justify-content-between gap-3 mb-4"><div><div class="eyebrow">AKSES PORTAL</div><h1 class="page-title h3">Manajemen User</h1><p class="text-secondary mb-0">Terhubung ke Google Sheet data pengguna RW 26.</p></div><div class="d-flex gap-2"><button class="btn btn-light border" id="refreshUsers"><i class="bi bi-arrow-clockwise me-2"></i>Segarkan</button><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userModal"><i class="bi bi-person-plus-fill me-2"></i>Tambah User</button></div></div><div class="alert alert-danger d-none" id="userError"></div><div class="card"><div class="card-body"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>User ID</th><th>Pengguna</th><th>Email</th><th>No HP</th><th>Role</th><th>Akses Menu</th><th>Status</th><th>Login Terakhir</th><th>Dibuat</th><th class="text-end">Aksi</th></tr></thead><tbody id="userTable"><tr><td colspan="10" class="text-center text-secondary py-5"><span class="spinner-border spinner-border-sm me-2"></span>Memuat data...</td></tr></tbody></table></div></div></div></section>
 
     <section class="page" id="visitor">
       <div class="d-flex flex-wrap justify-content-between gap-3 mb-4">
@@ -569,6 +569,26 @@
   <label class="form-label fw-bold">Akses Menu <span class="text-muted small">(centang menu untuk Editor)</span></label>
   <div class="row g-2" id="menuPermissionCheckboxes"></div>
 </div><div class="col-md-6"><label class="form-label">Wilayah ID</label><input class="form-control" id="userArea" value="RW026" required></div><div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="userStatus"><option>Aktif</option><option>Nonaktif</option></select></div><div class="col-md-6"><label class="form-label" id="passwordLabel">Password Awal</label><input type="password" class="form-control" id="userPassword" minlength="8" required><div class="form-text d-none" id="passwordHint">Kosongkan jika password tidak diubah.</div></div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveUserButton" type="submit">Tambah User</button></div></form></div></div></div>
+  <div class="modal fade" id="setPasswordModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered" style="max-width:520px"><div class="modal-content border-0 rounded-4"><form id="setPasswordForm">
+    <div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold"><i class="bi bi-key-fill text-primary me-2"></i>Atur Password Pengguna</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body py-3">
+      <input type="hidden" id="setPwUserId">
+      <div class="alert alert-warning py-2 px-3 small mb-3"><strong>Khusus Super Admin.</strong> Gunakan ini kalau pengguna tidak bisa login sama sekali, sehingga tautan reset dari email tidak bisa dipakai.</div>
+      <div class="mb-3"><label class="form-label fw-semibold">Pengguna</label><div class="form-control bg-body-tertiary" id="setPwInfo">-</div></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Email login <span class="text-muted small">(supaya bisa disalin dan dikirim ke pengguna)</span></label><input type="text" class="form-control" id="setPwEmail" readonly></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Password baru</label><input type="password" class="form-control" id="setPwPassword" minlength="8" required placeholder="Minimal 8 karakter" autocomplete="new-password">
+        <div class="form-text">Sampaikan password ini kepada pengguna lewat kanal yang aman. Sistem tidak pernah menampilkannya lagi.</div>
+      </div>
+      <div class="mb-1"><label class="form-label fw-semibold">Ulangi password baru</label><input type="password" class="form-control" id="setPwPassword2" minlength="8" required autocomplete="new-password">
+        <div class="form-text">Pengguna bisa langsung masuk dengan password ini, tanpa diminta menggantinya lagi.</div>
+      </div>
+      <div class="alert alert-danger d-none mt-3 mb-0" id="setPwAlert"></div>
+    </div>
+    <div class="modal-footer border-0 pt-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="setPwSubmitBtn" type="submit">
+      <span class="setPw-btn-label">Simpan Password</span>
+      <span class="spinner-border spinner-border-sm d-none" id="setPwSpinner"></span>
+    </button></div>
+  </form></div></div></div>
   <div class="modal fade" id="kasDeleteModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered" style="max-width:480px"><div class="modal-content border-0 rounded-4"><div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold"><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Hapus Transaksi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body py-4"><p class="mb-0">Yakin hapus transaksi ini?</p></div><div class="modal-footer border-0 pt-0 pb-4 px-4" style="gap:12px;justify-content:flex-end"><button type="button" class="btn btn-light px-4 py-2" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger px-4 py-2 fw-semibold" id="kasDeleteConfirmBtn">Hapus</button></div></div></div></div>
   <div class="modal fade" id="kasApproveModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered" style="max-width:480px"><div class="modal-content border-0 rounded-4"><div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold"><i class="bi bi-check-circle-fill text-success me-2"></i>Setujui Transaksi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body py-4"><p class="mb-0">Setujui transaksi ini? Saldo akan otomatis diperbarui.</p></div><div class="modal-footer border-0 pt-0 pb-4 px-4" style="gap:12px;justify-content:flex-end"><button type="button" class="btn btn-light px-4 py-2" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-success px-4 py-2 fw-semibold" id="kasApproveConfirmBtn">Setujui</button></div></div></div></div>
   <div class="modal fade" id="kasRejectModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered" style="max-width:480px"><div class="modal-content border-0 rounded-4"><div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold"><i class="bi bi-x-circle-fill text-warning me-2"></i>Tolak Transaksi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body py-4"><p class="mb-0 text-muted small">Beri alasan penolakan agar pembuat tahu apa yang perlu diperbaiki.</p><textarea class="form-control mt-3" id="kasRejectAlasan" rows="3" placeholder="Contoh: Bukti foto tidak sesuai, nominal salah, dll." required></textarea></div><div class="modal-footer border-0 pt-0 pb-4 px-4" style="gap:12px;justify-content:flex-end"><button type="button" class="btn btn-light px-4 py-2" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-warning px-4 py-2 fw-semibold" id="kasRejectConfirmBtn">Tolak</button></div></div></div></div>
@@ -756,12 +776,50 @@
     function renderFacilities(){ document.getElementById('facilityGrid').innerHTML = facilities.length?facilities.map(f=>`<div class="col-md-6 col-xl-4"><div class="card h-100 overflow-hidden">${f.imageUrl?`<img class="media-thumb" src="${esc(f.imageUrl)}" alt="${esc(f.nama)}" loading="lazy">`:''}<div class="card-body"><h6 class="fw-bold mb-1">${esc(f.nama)}</h6><p class="text-secondary small mb-3">${esc(f.deskripsi)}</p><div class="d-flex gap-2 flex-wrap">${f.maps?`<a class="btn btn-sm btn-outline-success" href="${esc(f.maps)}" target="_blank" rel="noopener"><i class="bi bi-geo-alt me-1"></i>Maps</a>`:''}<button class="btn btn-sm btn-light border ms-auto" onclick="editFacility('${esc(f.id)}')"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-light border text-danger" onclick="deleteFacility('${esc(f.id)}')"><i class="bi bi-trash"></i></button></div></div></div></div>`).join(''):'<div class="col-12"><div class="card"><div class="card-body text-center text-secondary py-5">Belum ada fasilitas.</div></div></div>'; }
     function renderOrg(){ const list=organization[activeOrgGroup]||[]; document.querySelectorAll('[data-org-group]').forEach(btn=>btn.classList.toggle('active',btn.dataset.orgGroup===activeOrgGroup)); document.getElementById('orgGrid').innerHTML = list.length?list.map(o=>`<div class="col-6 col-md-4 col-xl-3"><div class="card text-center h-100 org-card"><div class="card-body">${o.imageUrl?`<img class="avatar-photo mx-auto mb-2" src="${esc(o.imageUrl)}" alt="${esc(o.nama)}" loading="lazy">`:`<div class="avatar mx-auto mb-2">${esc(initials(o.nama))}</div>`}<small class="text-secondary">${esc(o.jabatan)}</small><div class="fw-bold small">${esc(o.nama)}</div><div class="mt-3"><button class="btn btn-sm btn-light border" onclick="editOrgMember('${esc(o.group)}','${esc(o.id)}')"><i class="bi bi-pencil"></i></button> <button class="btn btn-sm btn-light border text-danger" onclick="deleteOrgMember('${esc(o.group)}','${esc(o.id)}')"><i class="bi bi-trash"></i></button></div></div></div></div>`).join(''):'<div class="col-12"><div class="card"><div class="card-body text-center text-secondary py-5">Belum ada data pengurus.</div></div></div>'; }
     function esc(value){const div=document.createElement('div');div.textContent=value??'';return div.innerHTML;}
+
+    /**
+     * Isi kolom "Akses Menu" untuk satu pengguna.
+     *
+     * Yang ditampilkan adalah menu_access yang BENAR-BENAR berlaku, bukan
+     * daftar mentah. Alasannya: menu_access kosong bukan berarti "tidak ada
+     * akses" untuk semua role.
+     *
+     *   - Super Admin -> semua menu, dan menu_access memang selalu kosong.
+     *   - Admin       -> semua menu kecuali Monitoring Pengunjung, dan
+     *                     menu_access juga kosong.
+     *   - Editor      -> daftar yang benar-benar dikumpulkan di form.
+     *
+     * Kalau kolom ini diisi apa adanya dari menu_access, dua role pertama akan
+     * terlihat seperti "|tidak punya akses apa pun" - persis kebalikan dari
+     * kenyataannya. Itu kesalahan yang berbahaya: orang bisa menyimpulkan
+     * Editor punya akses lebih luas dari Super Admin.
+     */
+    function renderMenuAccess(u){
+      const badge='<span class="badge text-bg-light border fw-normal">';
+      if(u.role==='Super Admin'){
+        return '<span class="badge badge-soft-success">Semua menu</span>';
+      }
+      if(u.role==='Admin'){
+        return '<span class="badge badge-soft-success">Semua menu</span>'
+          +'<small class="text-secondary d-block mt-1">kecuali Monitoring Pengunjung</small>';
+      }
+      let daftar=[];
+      try{ daftar=JSON.parse(u.menuAkses||'[]')||[]; }catch(_){ daftar=[]; }
+      if(!Array.isArray(daftar)||!daftar.length){
+        return '<span class="badge badge-soft-danger">Tidak ada menu</span>'
+          +'<small class="text-secondary d-block mt-1">Editor ini tidak bisa membuka menu apa pun</small>';
+      }
+      const label={};
+      ALL_MENUS.forEach(m=>{label[m.id]=m.label;});
+      return daftar.map(id=>badge+esc(label[id]||id)+'</span>').join(' ');
+    }
     function renderUsers(){
       const actorRole = session?.user?.role || '';
+      const isSuperAdmin = actorRole === 'Super Admin';
       document.getElementById('userTable').innerHTML = users.length?users.map(u=>{
         const active=u.status==='Aktif';
         const canEdit = actorRole === 'Super Admin' || u.role !== 'Super Admin';
-        return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.wilayah)}</small></div></div></td><td class="text-nowrap small">${u.email?esc(u.email):'<span class="text-secondary">-</span>'}</td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td>${esc(u.wilayah)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap">${canEdit?`<button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button>`:''}</td></tr>`}).join(''):'<tr><td colspan="10" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>';
+        return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.wilayah)}</small></div></div></td><td class="text-nowrap small">${u.email?esc(u.email):'<span class="text-secondary">-</span>'}</td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td style="min-width:200px">${renderMenuAccess(u)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap">${canEdit?`<button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button>`:''} ${isSuperAdmin?`<button class="btn btn-sm btn-light border text-primary" onclick="openSetPassword('${esc(u.userId)}')" title="Atur Password"><i class="bi bi-key"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button>`:''}</td></tr>`}).join(''):'<tr><td colspan="10" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>';
     }
     /**
      * Tunda pemanggilan fn sampai pemanggil berhenti sebentar.
@@ -790,7 +848,7 @@
     }
     const _apiCacheTtl = 120000;
     const _apiPending = {};
-    const _mutationActions = new Set(['createUser','updateUser','toggleUser','deleteUser','createHimbauan','toggleHimbauan','deleteHimbauan','createAnnouncement','updateAnnouncement','toggleAnnouncement','deleteAnnouncement','createFacility','updateFacility','deleteFacility','createOrgMember','updateOrgMember','deleteOrgMember','refreshKas','createKas','updateKas','deleteKas','approveKas','rejectKas','createStatistik','updateStatistik','deleteStatistik','createGalleryAlbum','deleteGalleryAlbum','uploadGalleryPhoto','deleteGalleryPhoto','createVideo','updateVideo','toggleVideo','setVideoAutoplay','clearVideoAutoplay','deleteVideo','createVideoKegiatan','updateVideoKegiatan','toggleVideoKegiatan','deleteVideoKegiatan','uploadDriveImage','updateMyProfile','logout']);
+    const _mutationActions = new Set(['createUser','updateUser','setPasswordUser','toggleUser','deleteUser','createHimbauan','toggleHimbauan','deleteHimbauan','createAnnouncement','updateAnnouncement','toggleAnnouncement','deleteAnnouncement','createFacility','updateFacility','deleteFacility','createOrgMember','updateOrgMember','deleteOrgMember','refreshKas','createKas','updateKas','deleteKas','approveKas','rejectKas','createStatistik','updateStatistik','deleteStatistik','createGalleryAlbum','deleteGalleryAlbum','uploadGalleryPhoto','deleteGalleryPhoto','createVideo','updateVideo','toggleVideo','setVideoAutoplay','clearVideoAutoplay','deleteVideo','createVideoKegiatan','updateVideoKegiatan','toggleVideoKegiatan','deleteVideoKegiatan','uploadDriveImage','updateMyProfile','logout']);
     function _apiCacheKey(action,payload){return 'rw26cache_'+(session?.user?.userId||'anon')+'_'+action+'_'+JSON.stringify(payload);}
     function _apiCacheGet(key){try{const raw=sessionStorage.getItem(key);if(!raw)return undefined;const o=JSON.parse(raw);if(Date.now()-o.t>_apiCacheTtl){sessionStorage.removeItem(key);return undefined;}return o.d;}catch(e){return undefined;}}
     function _apiCacheSet(key,data){try{sessionStorage.setItem(key,JSON.stringify({t:Date.now(),d:data}));}catch(e){}}
@@ -1430,6 +1488,60 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     window.toggleUser=async userId=>{try{await apiRequest('toggleUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Status pengguna diperbarui.';toast();}catch(err){alert(err.message);}};
     window.editUser=userId=>{const u=users.find(item=>item.userId===userId);if(!u)return;document.getElementById('editUserId').value=u.userId;document.getElementById('userName').value=u.nama;document.getElementById('userEmail').value=u.email;document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';const menuAkses=JSON.parse(u.menuAkses||'[]');renderMenuCheckboxes(menuAkses);toggleMenuPermission();bootstrap.Modal.getOrCreateInstance('#userModal').show();};
     window.deleteUser=async userId=>{if(!confirm(`Hapus pengguna ${userId} dari database?`))return;try{await apiRequest('deleteUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Pengguna berhasil dihapus.';toast();}catch(err){alert(err.message);}};
+
+    /**
+     * Buka modal "Atur Password" untuk seorang pengguna.
+     *
+     * Berdiri sendiri dari form Edit. Alasan: updateUser menulis SELURUH kolom
+     * profil dari payload yang dikirim, jadi menyalin password lewat form itu
+     * berarti ikut mengirim nama/role/wilayah/menu_access juga - dan kalau ada
+     * satu saja yang tidak sesuai isinya, hak akses pengguna bisa berubah tanpa
+     * disengaja. Aksi terpisah hanya menyentuh password.
+     */
+    window.openSetPassword=userId=>{
+      const u=users.find(item=>item.userId===userId);
+      if(!u){toast('Pengguna tidak ditemukan di daftar. Muat ulang halaman.',true);return;}
+      const alertEl=document.getElementById('setPwAlert');
+      alertEl.classList.add('d-none');
+      document.getElementById('setPwUserId').value=u.userId;
+      document.getElementById('setPwInfo').textContent=u.nama+' ('+u.userId+') - '+u.role+(u.status==='Aktif'?'':' - NONAKTIF');
+      document.getElementById('setPwEmail').value=u.email||'';
+      document.getElementById('setPwPassword').value='';
+      document.getElementById('setPwPassword2').value='';
+      bootstrap.Modal.getOrCreateInstance('#setPasswordModal').show();
+    };
+
+    document.getElementById('setPasswordForm').onsubmit=async e=>{
+      e.preventDefault();
+      const userId=document.getElementById('setPwUserId').value;
+      const pass=document.getElementById('setPwPassword').value;
+      const pass2=document.getElementById('setPwPassword2').value;
+      const alertEl=document.getElementById('setPwAlert');
+      const btn=document.getElementById('setPwSubmitBtn');
+      alertEl.classList.add('d-none');
+      if(pass!==pass2){alertEl.textContent='Ulangi password tidak cocok.';alertEl.classList.remove('d-none');return;}
+      if(pass.length<8){alertEl.textContent='Password baru minimal 8 karakter.';alertEl.classList.remove('d-none');return;}
+      btn.disabled=true;
+      btn.querySelector('.setPw-btn-label').classList.add('d-none');
+      document.getElementById('setPwSpinner').classList.remove('d-none');
+      try{
+        const hasil=await apiRequest('setPasswordUser',{user:{userId,password:pass}});
+        bootstrap.Modal.getInstance('#setPasswordModal').hide();
+        document.getElementById('toastMessage').textContent=(hasil&&hasil.message)
+          ? hasil.message : 'Password berhasil diganti.';
+        toast();
+        // Muat ulang daftar: baris pengguna ini berubah status login-nya, dan
+        // daftar perlu mencerminkan itu.
+        await segarkan(loadUsers);
+      }catch(err){
+        alertEl.textContent=err.message;
+        alertEl.classList.remove('d-none');
+      }finally{
+        btn.disabled=false;
+        btn.querySelector('.setPw-btn-label').classList.remove('d-none');
+        document.getElementById('setPwSpinner').classList.add('d-none');
+      }
+    };
     window.toggleHimbauan=async id=>{try{await apiRequest('toggleHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Status himbauan diperbarui.';toast();}catch(err){alert(err.message);}};
     window.deleteHimbauan=async id=>{if(!confirm(`Hapus slide himbauan ID ${id}? File di Drive juga akan dipindahkan ke sampah.`))return;try{await apiRequest('deleteHimbauan',{id});await loadHimbauan();document.getElementById('toastMessage').textContent='Himbauan berhasil dihapus.';toast();}catch(err){alert(err.message);}};
 

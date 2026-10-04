@@ -173,6 +173,10 @@ function doPost(e) {
       //      Script Properties. ----
       case 'createUser': return createSupabaseUser_(body);
       case 'updateUser': return updateSupabaseUser_(body);
+      //  Sengaja TIDAK memakai updateUser - lihat catatan panjang di
+      //  setPasswordUser_: payload yang hanya berisi password akan membuat
+      //  role dan menu_access ikut tertimpa.
+      case 'setPasswordUser': return setPasswordUser_(body);
       case 'deleteUser': return deleteSupabaseUser_(body);
 
       // ---- Reset password mandiri ----
@@ -231,9 +235,9 @@ function doPost(e) {
  * PENTING - kenapa header Prefer selalu dikirimkan:
  * ----------------------------------------------------
  * PostgREST membalas 204 No Content untuk PATCH/POST/PUT/DELETE yang tidak
- * meminta apa-apa. Damages itu diam-diam: pemanggil yang满怀希望 pada baris
- * yang dikembalikan akan menerima `{}`, dan karena `{}` itu benar
- * (bukan error), kode lanjut ke cabang "data tidak ditemukan".
+ * meminta apa-apa. Bahaya itu datangnya diam-diam: pemanggil yang
+ * mengharapkan baris akan menerima `{}`, dan karena `{}` itu bukan error,
+ * kode lanjut ke cabang "data tidak ditemukan".
  *
  * Contoh nyata yang pernah merusak reset password:
  *
@@ -340,7 +344,20 @@ function createSupabaseUser_(body) {
       must_change_pw: true
     });
   } catch (e) {
-    console.warn('profiles gagal diperbarui untuk ' + email + ': ' + e.message);
+    // Dulu kegagalan di sini hanya ditulis ke console.warn, lalu fungsi tetap
+    // menjawab "berhasil". Akibatnya akun terlihat benar padahal role,
+    // status, dan menu_access-nya TIDAK tersimpan - dan yang salah itu baru
+    // ketahuan saat Editor mengeluh tidak bisa membuka menu.
+    //
+    // Kegagalan ini tidak bisa dipulihkan sendiri: baris profiles sudah
+    // dibuat oleh trigger, jadi memunculkan error membuat Super Admin tahu
+    // ada yang perlu diperbaiki manual - jauh lebih baik daripada diam-diam
+    // menyimpan data yang separuh.
+    console.error('GAGAL menyimpan profil ' + email + ': ' + e.message);
+    logActivity_(actor, 'create', 'users',
+      'GAGAL menyimpan data profil ' + email + ': ' + e.message);
+    throw new Error('Akun ' + email + ' dibuat, tetapi data hak aksesnya gagal disimpan: '
+      + e.message + '\nPerbaiki menu akses dan status akun ini secara manual.');
   }
 
   logActivity_(actor, 'create', 'users', 'Menambah pengguna ' + nama + ' (' + role + ')');
@@ -392,6 +409,94 @@ function updateSupabaseUser_(body) {
 
   logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + legacyId);
   return json_({ ok: true, message: 'Data pengguna diperbarui.' });
+}
+
+/**
+ * Super Admin menetapkan password seorang pengguna secara langsung.
+ *
+ * KAPAN DIPAKAI
+ * -------------
+ * User tidak bisa login sama sekali, jadi alur tautan reset dari email tidak
+ * bisa menjadi jalan: kalau dia tidak bisa masuk, kemungkinan besar
+ * dia juga tidak punya akses ke mailbox-nya. Dalam keadaan itu satu-satunya
+ * jalan adalah Super Admin yang mengaturnya dari sini.
+ *
+ * Kenapa bukan memakai updateUser
+ * ------------------------------
+ * updateSupabaseUser_ menulis SELURUH kolom profil dari payload: nama, no_hp,
+ * role, wilayah, status, menu_access. Kalau aksi ini mengirim payload yang
+ * hanya berisi userId + password, dua hal rusak diam-diam:
+ *
+ *   1. role. supabaseRoleFilter_(undefined) mengembalikan 'Editor', jadi
+ *      setiap Super Admin/Admin yang Password-nya diganti akan SENYAP turun
+ *      menjadi Editor.
+ *   2. menu_access. Kalau role-nya tidak ikut dikirim, daftar menu ikut
+ *      dikosongkan.
+ *
+ * Jadi aksi ini SENGAJA terpisah: hanya menyentuh password di Supabase Auth
+ * dan satu flag di profiles. Tidak ada kolom lain yang bisa tersentuh, jadi
+ * tidak mungkin ada efek samping di luar yang terlihat di form.
+ *
+ * Yang juga diurus di sini: turunkan must_change_pw.
+ *
+ * Tanpa itu, password yang baru ditetapkan TIDAK akan membuat orang itu bisa
+ * masuk. rw26-api.js akan mengarahkan dia ke update-password.html setiap kali
+ * login - dan di sana ia butuh tautan reset yang tidak pernah dia terima.
+ * Persis jebakan yang membuat user "nyangkut" sejak awal.
+ */
+function setPasswordUser_(body) {
+  const actor = requireSupabaseUser_(body.token);
+  if (actor.role !== 'Super Admin') {
+    throw new Error('Hanya Super Admin yang dapat mengatur password pengguna lain.');
+  }
+
+  const u = body.user || {};
+  const legacyId = String(u.userId || '').trim();
+  const password = String(u.password || '');
+  if (!legacyId) throw new Error('ID pengguna wajib diisi.');
+  if (password.length < 8) throw new Error('Password minimal 8 karakter.');
+
+  const cfg = supabaseConfig_();
+  const found = fetchSupabaseProfileByLegacyId_(cfg, legacyId);
+  if (!found) throw new Error('Pengguna tidak ditemukan.');
+
+  // Email ikut dikembalikan supaya Super Admin bisa menyalinnya danzt memberitahu
+  // ke yang bersangkutan. Tanpa ini, orang biasanya tidak tahu email mana
+  // yang dipakai untuk login - login hanya menerima email, bukan User ID
+  // (lihat 0008_login_dengan_user_id.sql).
+  const email = ambilEmailUser_(cfg, found.id);
+  if (!email) {
+    throw new Error('Email pengguna ' + legacyId + ' tidak terbaca. Password tidak diubah.');
+  }
+
+  // Tulis password ke Supabase Auth.
+  supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(found.id), {
+    password: password
+  });
+
+  // Naikkan penanda login pertama. Tanpa langkah ini akun yang tadinya
+  // `must_change_pw = true` akan terus diarahkan ke halaman ganti password.
+  try {
+    supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(found.id), {
+      must_change_pw: false
+    });
+  } catch (e) {
+    // Password SUDAH terganti di sini. Melempar error tanpa penjelasan akan
+    // membuat Super Admin mengira seluruhnya gagal lalu mengulangi - padahal
+    // mengulangi aman. Pesannya harus jujur soal apa yang sudah berhasil.
+    console.error('GAGAL menurunkan must_change_pw untuk ' + legacyId + ': ' + e.message);
+    throw new Error('Password untuk ' + legacyId + ' sudah diganti, tetapi penanda "login pertama" '
+      + 'belum turun. Pengguna akan diminta mengganti password lagi di login berikutnya. '
+      + 'Hubungi Super Admin lain atau perbaiki manual di database. '
+      + 'Detail: ' + e.message);
+  }
+
+  logActivity_(actor, 'update', 'users', 'Super Admin menetapkan password ' + legacyId + ' (' + email + ')');
+  return json_({
+    ok: true,
+    message: 'Password ' + legacyId + ' berhasil diganti.',
+    email: email
+  });
 }
 
 function deleteSupabaseUser_(body) {

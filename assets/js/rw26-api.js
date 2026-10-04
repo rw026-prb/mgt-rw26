@@ -49,7 +49,11 @@ window.RW26 = (function () {
     'uploadDriveImage',
     // Operasi auth. Butuh kunci service_role yang TIDAK BOLEH ada di browser,
     // jadi tetap lewat Apps Script yang menyimpannya di Script Properties.
-    'createUser', 'updateUser', 'deleteUser'
+    'createUser', 'updateUser', 'deleteUser',
+    // Mengganti password pengguna lain. Butuh service_role karena Supabase Auth
+    // hanya menerima penulisan password lewat Admin API. Sengaja aksi terpisah
+    // dari updateUser - lihat catatan di setPasswordUser_ (Code.gs).
+    'setPasswordUser'
   ]);
 
   // -------------------------------------------------------------------------
@@ -316,7 +320,7 @@ window.RW26 = (function () {
       // layar, bukan karena datanya tidak ada.
       //
       // Kalau RPC-nya belum ada di database, daftar TETAP dimuat tanpa email -
-      // email yang hilang lebih baik daripada seluruh halaman управления user
+      // email yang hilang lebih baik daripada seluruh halaman manajemen user
       // ikut gagal.
       var rows = [];
       var emails = {};
