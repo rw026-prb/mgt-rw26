@@ -898,6 +898,22 @@
       ALL_MENUS.forEach(m=>{label[m.id]=m.label;});
       return daftar.map(id=>badge+esc(label[id]||id)+'</span>').join(' ');
     }
+    // Bolehkah pengguna yang sedang login mengubah email akun ini?
+    //
+    // Fungsi ini dipanggil dari beberapa tempat (editUser DAN renderUsers), jadi
+    // perannya dihitung ulang di sini dari `session`.
+    //
+    // Versi sebelumnya menulis `isSuperAdmin` dan `actorRole` - dua variabel
+    // yang hanya ada di lingkup LOKAL renderUsers(). Dari editUser keduanya
+    // tidak terlihat, jadi menekan tombol Edit melempar ReferenceError dan
+    // modal tidak pernah terbuka. Gejalanya persis "tombolnya tidak bisa
+    // diklik", padahal handler-nya dipanggil.
+    function bolehUbahEmailPengguna(targetRole) {
+      const r = session?.user?.role || '';
+      if (r === 'Super Admin') return true;
+      return r === 'Admin' && targetRole === 'Editor';
+    }
+
     function renderUsers(){
       const actorRole = session?.user?.role || '';
       const isSuperAdmin = actorRole === 'Super Admin';
@@ -1594,7 +1610,7 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
       //  akun Admin lain maupun akun Super Admin. Field-nya dikunci di sisi ini
       //  supaya tidak ada yang diketik lalu ditolak server - dan supaya alasannya
       //  terlihat langsung, bukan baru muncul setelah menekan Simpan.
-      const bolehUbahEmail = isSuperAdmin || (actorRole === 'Admin' && u.role === 'Editor');
+      const bolehUbahEmail = bolehUbahEmailPengguna(u.role);
       document.getElementById('userEmail').readOnly=!bolehUbahEmail;
       document.getElementById('userEmailHint').classList.toggle('d-none',bolehUbahEmail);
       document.getElementById('userEmail').title=bolehUbahEmail?'':'Anda hanya dapat mengubah pengguna dengan peran Editor. Akun ini berperan '+u.role+'.';document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';const menuAkses=(()=>{try{const p=JSON.parse(u.menuAkses||'[]');return Array.isArray(p)?p:[];}catch(_){return[];}})();renderMenuCheckboxes(menuAkses);toggleMenuPermission();bootstrap.Modal.getOrCreateInstance('#userModal').show();};
