@@ -102,6 +102,22 @@
       nonaktif: 'Akun Anda sedang dinonaktifkan. Hubungi administrator.',
       jaringan: 'Tidak dapat terhubung ke server. Periksa koneksi internet Anda lalu muat ulang halaman.'
     };
+
+// Alasan KHUSUS: orang yang login dengan benar, tetapi passwordnya masih
+    // yang sementara sehingga harus menggantinya dulu.
+    //
+    // Yang dijaga di sini bukan tampilan, melainkan tidak adanya putaran
+    // (loop). rw26-api.js mengirim orang ini ke
+    // update-password.html?alasan=login-awal. Halaman itu membutuhkan sesi
+    // Supabase yang sudah hidup - itulah bukti bahwa mereka memang orang yang
+    // tepat. Kalau sesinya dihapus di sini, mereka tidak akan pernah bisa
+    // menyelesaikan langkahnya.
+    //
+    // Yang TIDAK boleh terjadi: meneruskan ke index.html. Portal akan
+    // mengarahkan balik ke update-password.html, dan orang itu tidak punya
+    // jalan keluar selain menekan tombol yang sama lagi.
+    const WAJIB_GANTI = 'login-awal';
+    const perluGantiPassword = new URLSearchParams(location.search).get('alasan') === WAJIB_GANTI;
     const alasan = new URLSearchParams(location.search).get('err');
     if (alasan && PESAN[alasan]) {
       const el = document.getElementById('loginAlert');
@@ -134,6 +150,15 @@
 
     (async () => {
       if (!sb) return;
+
+      // Orang yang memang harus mengganti password dikirim ke halaman itu,
+      // bukan ke portal. Lihat catatan panjang di dekat penanda WAJIB_GANTI
+      // di atas.
+      if (perluGantiPassword) {
+        location.replace('update-password.html?alasan=' + WAJIB_GANTI);
+        return;
+      }
+
       if (baruSajaDikeluarkan()) {
         // Beri tahu apa yang terjadi, jangan diam-diam arahkan lagi.
         const el=document.getElementById('loginAlert');

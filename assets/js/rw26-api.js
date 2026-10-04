@@ -918,7 +918,15 @@ window.RW26 = (function () {
       // Saat migrasi, setiap akun diberi password acak. Flag ini memastikan
       // password itu diganti sebelum orang bisa memakai portal.
       if (profile.must_change_pw) {
-        stopAndRedirect('update-password.html');
+        // Penanda `?alasan=` itu penting. Tanpa itu, orang yang telah diarahkan
+        // ke sini akan menekan "Kembali ke Login", lalu login.html melihat
+        // sesi masih hidup dan mengirimnya BALIK ke index.html - yang
+        // mengarahkan lagi ke halaman ini. Putaran tanpa henti.
+        //
+        // Penanda itu memberi tahu login.html: orang ini memang tidak boleh
+        // masuk ke portal, jadi jangan diteruskan. Halaman update-password.html
+        // yang akan menangani pertukaran password-nya.
+        stopAndRedirect('update-password.html?alasan=login-awal');
         return;
       }
 
