@@ -1614,7 +1614,33 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
       document.getElementById('userEmail').readOnly=!bolehUbahEmail;
       document.getElementById('userEmailHint').classList.toggle('d-none',bolehUbahEmail);
       document.getElementById('userEmail').title=bolehUbahEmail?'':'Anda hanya dapat mengubah pengguna dengan peran Editor. Akun ini berperan '+u.role+'.';document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';const menuAkses=(()=>{try{const p=JSON.parse(u.menuAkses||'[]');return Array.isArray(p)?p:[];}catch(_){return[];}})();renderMenuCheckboxes(menuAkses);toggleMenuPermission();bootstrap.Modal.getOrCreateInstance('#userModal').show();};
-    window.deleteUser=async userId=>{if(!confirm(`Hapus pengguna ${userId} dari database?`))return;try{await apiRequest('deleteUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Pengguna berhasil dihapus.';toast();}catch(err){alert(err.message);}};
+    /**
+     * Hapus pengguna, setelah konfirmasi yang menyebut orangnya.
+     *
+     * Konfirmasi lama hanya berbunyi "Hapus pengguna RW-0007 dari database?".
+     * Itu tidak memberi breederan sama sekali - tidak ada nama, tidak ada
+     * peringatan bahwa akun tidak bisa dipulihkan. Untuk tindakan yang
+     * menghapus akun beserta seluruh isinya (ON DELETE CASCADE), pesan
+     * konfirmasi adalah tempat terakhir untuk berhenti dan berpikir.
+     */
+    window.deleteUser=async userId=>{
+      const u=users.find(item=>item.userId===userId);
+      if(!u){toast('Pengguna tidak ditemukan di daftar. Muat ulang halaman.',true);return;}
+      const ok=confirm(
+        'Hapus pengguna '+u.nama+' ('+userId+', '+u.role+')?\n\n'
+        +'Akun ini akan dihapus permanen: email, password, dan seluruh isinya hilang\n'
+        +'dan tidak bisa dipulihkan.\n\n'
+        +'Kalau hanya ingin mencegah orang masuk, lebih baik Nonaktifkan.'
+      );
+      if(!ok)return;
+      try{
+        const hasil=await apiRequest('deleteUser',{userId});
+        document.getElementById('toastMessage').textContent=(hasil&&hasil.message)
+          ? hasil.message : 'Pengguna berhasil dihapus.';
+        toast();
+        await segarkan(loadUsers);
+      }catch(err){alert(err.message);}
+    };
 
     /**
      * Buka modal "Atur Password" untuk seorang pengguna.

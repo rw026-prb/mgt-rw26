@@ -285,11 +285,45 @@ function supabaseRoleFilter_(role) {
   return ['Super Admin', 'Admin', 'Editor'].indexOf(String(role || '')) >= 0 ? role : 'Editor';
 }
 
+/**
+ * Ubah apa pun yang datang dari form menjadi daftar id menu.
+ *
+ * BENTUK YANG HARUS DITANGANI
+ * ---------------------------
+ * Dua-duanya sah, dan keduanya benar-benar dipakai di proyek ini:
+ *
+ *   - ARRAY biasa   : dikirim index.html, hasil pengumpulan nilai checkbox
+ *                     yang ber-Type String. Ini yang terjadi di produksi.
+ *   - TEKS JSON     : bentuk lama, masih dipakai bila ada pemanggil lain.
+ *
+ * Versi sebelumnya HANYA menerima teks JSON: ia selalu menjalankan
+ * JSON.parse(String(raw)). Untuk array, String(['himbauan','kas']) menjadi
+ * "himbauan,kas" - yang bukan JSON, jadi JSON.parse melempar error dan catch
+ * mengembalikan [].
+ *
+ * Akibatnya SETIAP penyimpanan pengguna Editor menghapus seluruh akses
+ * menunya, tanpa error dan tanpa pesan - server tetap menjawab "Data pengguna
+ * diperbarui". Kolom Akses Menu di daftar pun selalu kosong, dan itu membuat
+ * gejalanya terlihat seperti fitur yang tidak bekerja, bukan bug.
+ *
+ * Fungsi ini sengaja tidak membuang id yang tidak dikenal. Menu yang dihapus
+ * dari ALL_MENUS tapi masih tersimpan akan tetap terlihat di daftar admin,
+ * sehingga bisa dibersihkan - dan bukan hilang tanpa jejak.
+ */
 function parseMenuAkses_(raw) {
   try {
-    const parsed = JSON.parse(String(raw || '[]'));
-    return Array.isArray(parsed) ? parsed.map(String) : [];
+    var daftar = raw;
+    if (typeof daftar === 'string') {
+      daftar = JSON.parse(daftar || '[]');
+    }
+    if (!Array.isArray(daftar)) return [];
+    // map(String) membersihkan angka atau objek yang mungkin terkirim, filter
+    // membuang string kosong dari checkbox yang nilainya kosong.
+    return daftar.map(String).filter(function (id) { return id !== ''; });
   } catch (e) {
+    // DIWARNINGKAN, bukan ditelan diam-diam. Kalau bentuk datanya lagi
+    // berubah, ini satu-satunya tempat yang mengatakannya.
+    console.warn('menuAkses tidak bisa dibaca, diisi kosong: ' + (e && e.message));
     return [];
   }
 }
@@ -311,6 +345,23 @@ function createSupabaseUser_(body) {
 
   const role = supabaseRoleFilter_(u.role);
   const status = String(u.status || 'Aktif').toLowerCase() === 'aktif' ? 'Aktif' : 'Nonaktif';
+
+  // Perhitung menu SEBELUM email dan profiles ditulis, supaya penyimpangan
+  // ketahuan tanpa meninggalkan keadaan setengah jadi.
+  //
+  // Kalau form mengirim daftar yang TIDAK kosong tapi hasil bacanya kosong,
+  // berarti bentuk datanya tidak seperti yang diharapkan di sini. Dulu
+  // keadaan itu berakhir dengan [] yang ditulis diam-diam - semua akses menu
+  // Editor hilang, dan server tetap menjawab "berhasil". Sekarang itu
+  // ditolak: lebih baik Super Admin melihat error daripada akses Editor
+  // hilang tanpa jejak.
+  const menuAccess = parseMenuAkses_(u.menuAkses);
+  if (role === 'Editor' && menuAccess.length === 0 && u.menuAkses
+      && typeof u.menuAkses !== 'string' && Array.isArray(u.menuAkses)
+      && u.menuAkses.length > 0) {
+    throw new Error('Daftar akses menu tidak bisa dibaca, jadi tidak ada yang disimpan. '
+      + 'Perubahan lain tidak disimpan.');
+  }
 
   // 1. Buat akun di auth.users. Baris profiles dibuat otomatis oleh trigger
   //    tg_auth_user_created yang terpasang di 0002_rls.sql.
@@ -340,7 +391,9 @@ function createSupabaseUser_(body) {
       role: role,
       wilayah: String(u.wilayah || 'RW026'),
       status: status,
-      menu_access: role === 'Editor' ? parseMenuAkses_(u.menuAkses) : [],
+      // menuAccess sudah divalidasi bentuknya di atas, jadi di sini cukup
+      // memakainya - tidak ada dua tempat yang mengurai data yang sama.
+      menu_access: role === 'Editor' ? menuAccess : [],
       must_change_pw: true
     });
   } catch (e) {
@@ -413,6 +466,23 @@ function updateSupabaseUser_(body) {
 
   const status = String(u.status || 'Aktif').toLowerCase() === 'aktif' ? 'Aktif' : 'Nonaktif';
 
+  // Perhitung menu SEBELUM email dan profiles ditulis, supaya penyimpangan
+  // ketahuan tanpa meninggalkan keadaan setengah jadi.
+  //
+  // Kalau form mengirim daftar yang TIDAK kosong tapi hasil bacanya kosong,
+  // berarti bentuk datanya tidak seperti yang diharapkan di sini. Dulu
+  // keadaan itu berakhir dengan [] yang ditulis diam-diam - semua akses menu
+  // Editor hilang, dan server tetap menjawab "berhasil". Sekarang itu
+  // ditolak: lebih baik Super Admin melihat error daripada akses Editor
+  // hilang tanpa jejak.
+  const menuAccess = parseMenuAkses_(u.menuAkses);
+  if (role === 'Editor' && menuAccess.length === 0 && u.menuAkses
+      && typeof u.menuAkses !== 'string' && Array.isArray(u.menuAkses)
+      && u.menuAkses.length > 0) {
+    throw new Error('Daftar akses menu tidak bisa dibaca, jadi tidak ada yang disimpan. '
+      + 'Perubahan lain tidak disimpan.');
+  }
+
   // ---------------------------------------------------------------------------
   //  EMAIL
   // ---------------------------------------------------------------------------
@@ -459,7 +529,7 @@ function updateSupabaseUser_(body) {
     role: role,
     wilayah: String(u.wilayah || found.wilayah || 'RW026'),
     status: status,
-    menu_access: role === 'Editor' ? parseMenuAkses_(u.menuAkses) : []
+    menu_access: role === 'Editor' ? menuAccess : []
   });
 
   // PATCH yang tidak menyentuh satu baris pun TETAP membalas 200. Tanpa
@@ -576,13 +646,34 @@ function setPasswordUser_(body) {
   });
 }
 
+/**
+ * Hapus sebuah akun.
+ *
+ * HAK AKSES
+ * ---------
+ * Super Admin : boleh menghapus siapa pun, kecuali dirinya sendiri dan kecuali
+ *               akun Super Admin lain (yang hanya bisa dinonaktifkan).
+ * Admin       : boleh menghapus akun berperan EDITOR saja.
+ *
+ * Aturan Admin ini sengaja sama dengan aturan edit-nya: "Admin hanya mengelola
+ * Editor". Kalau hapus boleh untuk semua role sementara edit tidak, Admin bisa
+ * menentukan siapa yang boleh kehilangan akses lewat jalur yang lebih kasar -
+ * menghapus Akun Editor, lalu membuat ulang dengan email yang sama untuk
+ * mengambil alihnya.
+ *
+ * Karena itu pemeriksaan dilakukan terhadap `found.role` -
+ * peran yang DIMILIKI akun tersebut sekarang - dan selesai sebelum ada satu
+ * pun penulisan. Kalau ditolak, tidak ada keadaan setengah jadi.
+ */
 function deleteSupabaseUser_(body) {
   const actor = requireSupabaseUser_(body.token);
-  if (actor.role !== 'Super Admin') {
-    throw new Error('Hanya Super Admin yang dapat menghapus pengguna.');
+  if (actor.role !== 'Super Admin' && actor.role !== 'Admin') {
+    throw new Error('Anda tidak memiliki akses untuk tindakan ini.');
   }
 
   const legacyId = String(body.userId || '').trim();
+  if (!legacyId) throw new Error('ID pengguna wajib diisi.');
+
   const cfg = supabaseConfig_();
   const found = fetchSupabaseProfileByLegacyId_(cfg, legacyId);
   if (!found) throw new Error('Pengguna tidak ditemukan.');
@@ -590,13 +681,23 @@ function deleteSupabaseUser_(body) {
   if (found.role === 'Super Admin') {
     throw new Error('Pengguna Super Admin hanya dapat dinonaktifkan, tidak dihapus.');
   }
+  if (actor.role === 'Admin' && found.role !== 'Editor') {
+    // Pakai legacyId dari body, bukan found.legacy_id: nilainya sudah
+    // divalidasi di atas, dan pesan error tidak boleh menampilkan "undefined"
+    // kalau suatu saat kolomnya ternyata tidak ikut terpilih.
+    throw new Error('Admin hanya dapat menghapus pengguna dengan peran Editor. '
+      + 'Akun ' + legacyId + ' berperan ' + found.role + ', jadi hanya Super Admin yang boleh menghapusnya.');
+  }
 
   // Hapus dari auth.users lebih dulu. Baris profiles ikut terhapus karena
   // kolomnya memakai ON DELETE CASCADE.
+  //
+  // Tindakan ini tidak bisa dibatalkan: tidak ada tempat untuk memulihkannya, dan
+  // jejak activity_log tetap ada meski akunnya hilang.
   supabaseAdmin_('delete', '/auth/v1/admin/users/' + encodeURIComponent(found.id));
 
-  logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + legacyId);
-  return json_({ ok: true, message: 'Pengguna berhasil dihapus.' });
+  logActivity_(actor, 'delete', 'users', 'Menghapus pengguna ' + legacyId + ' (' + found.role + ')');
+  return json_({ ok: true, message: 'Pengguna ' + legacyId + ' berhasil dihapus.' });
 }
 
 function fetchSupabaseProfileByLegacyId_(cfg, legacyId) {
