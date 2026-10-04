@@ -379,17 +379,81 @@ function updateSupabaseUser_(body) {
   if (!found) throw new Error('Pengguna tidak ditemukan.');
 
   const role = supabaseRoleFilter_(u.role);
-  // Super Admin tidak boleh menurunkan haknya sendiri, supaya tidak pernah
-  // terkunci di luar portal.
-  if (actor.role === 'Admin' && (found.role === 'Super Admin' || role === 'Super Admin')) {
-    throw new Error('Admin tidak dapat mengubah pengguna bertingkat Super Admin.');
+
+  // ATURAN HAK AKSES ADMIN
+  // -----------------------
+  // Admin boleh mengubah APAPUN pada akun Editor - nama, email, nomor HP,
+  // role, status, menu akses, semuanya.
+  //
+  // Admin TIDAK boleh menyentuh akun Admin lain, maupun akun Super Admin.
+  //  Intinya satu kalimat: "Admin hanya mengelola Editor". Dulu aturan ini
+  // hanya melarang Super Admin, jadi Admin masih bisa mengedit sesama Admin -
+  // termasuk memindahkan email-nya, yang membuat akun itu tidak lagi bisa
+  // masuk dengan email lamanya.
+  //
+  // Pemeriksaan dilakukan terhadap `found.role` (peran yang DIMILIKI akun
+  // tersebut sekarang) sebelum perubahan apa pun ditulis, jadi tidak ada
+  // keadaan setengah jadi kalau ditolak.
+  if (actor.role === 'Admin' && found.role !== 'Editor') {
+    throw new Error('Admin hanya dapat mengubah pengguna dengan peran Editor. '
+      + 'Akun ' + legacyId + ' berperan ' + found.role + ', jadi hanya Super Admin yang boleh mengubahnya.');
   }
+
+  // Admin juga tidak boleh menaikkan hak akses apa pun menjadi Super Admin,
+  // termasuk akun Editor-nya sendiri.
+  if (actor.role === 'Admin' && role === 'Super Admin') {
+    throw new Error('Admin tidak dapat memberikan peran Super Admin.');
+  }
+
+  // Tidak boleh mengubah role sendiri - supaya tidak pernah mengunci dirinya
+  // sendiri di luar portal.
   if (actor.id === found.id && role !== actor.role) {
     throw new Error('Anda tidak dapat mengubah role sendiri.');
   }
 
   const status = String(u.status || 'Aktif').toLowerCase() === 'aktif' ? 'Aktif' : 'Nonaktif';
-  supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(found.id), {
+
+  // ---------------------------------------------------------------------------
+  //  EMAIL
+  // ---------------------------------------------------------------------------
+  //  Email TIDAK ada di tabel profiles - yang menyimpannya adalah auth.users.
+  //  Dulu aksi ini sama sekali tidak membaca u.email, padahal kolomnya ada di
+  //  form dan bisa diketik. Akibatnya Super Admin mengubah email, melihat
+  //  "Data pengguna diperbarui", lalu emailnya tetap yang lama - dan itu
+  //  lebih buruk daripada error, karena orang mengira semuanya sudah beres.
+  //
+  //  Urutan: Auth dulu, baru profiles. Kalau email gagal, profiles belum
+  //  tersentuh, jadi tidak ada keadaan setengah jadi yang tidak diketahui.
+  //
+  //  Boleh oleh Super Admin, dan oleh Admin selama akun yang dituju berperan
+  //  Editor - itu sudah dipastikan gate di atas. Karena itu tidak perlu
+  //  pemeriksaan role tambahan di sini: kalau akunnya bukan Editor, kode sudah
+  //  berhenti sebelum mencapai baris ini.
+  const emailBaru = String(u.email || '').trim().toLowerCase();
+  let emailBerubah = false;
+  if (emailBaru) {
+    if (emailBaru.indexOf('@') < 1) {
+      throw new Error('Format email tidak benar. Perubahan lain tidak disimpan.');
+    }
+    const emailLama = ambilEmailUser_(cfg, found.id);
+    if (emailLama && emailLama.toLowerCase() !== emailBaru) {
+      try {
+        // email_confirm: true karena inilah yang membuat orang bisa langsung
+        // login dengan email baru. Tanpa itu email baru harus dikonfirmasi
+        // dulu dan akun terkunci sampai tautan konfirmasi clicked.
+        supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(found.id), {
+          email: emailBaru,
+          email_confirm: true
+        });
+        emailBerubah = true;
+      } catch (e) {
+        throw new Error('Gagal mengubah email: ' + e.message
+          + '\nPerubahan lain tidak disimpan.');
+      }
+    }
+  }
+
+  const terpakai = supabaseAdmin_('patch', '/rest/v1/profiles?id=eq.' + encodeURIComponent(found.id), {
     nama: String(u.nama || found.nama).trim(),
     no_hp: String(u.noHp || '') || null,
     role: role,
@@ -398,8 +462,16 @@ function updateSupabaseUser_(body) {
     menu_access: role === 'Editor' ? parseMenuAkses_(u.menuAkses) : []
   });
 
-  // Email dan password hanya bisa diubah lewat Supabase Auth. Tidak
-  // termasuk di sini supaya tidak diam-diam mengganti kredensial login.
+  // PATCH yang tidak menyentuh satu baris pun TETAP membalas 200. Tanpa
+  // pemeriksaan ini, filter yang salah ketemu (mis. id-nya berubah format)
+  // akan terlihat sebagai "berhasil" padahal tidak ada yang berubah - pola
+  // kegagalan senyap yang sama seperti kasus email di atas.
+  if (!Array.isArray(terpakai) || !terpakai.length) {
+    throw new Error('Tidak ada baris profil ' + legacyId + ' yang diperbarui. '
+      + 'Data tidak berubah.'
+      + (emailBerubah ? '\nNB: email sudah berhasil diubah.' : ''));
+  }
+
   if (u.password) {
     if (String(u.password).length < 8) throw new Error('Password minimal 8 karakter.');
     supabaseAdmin_('put', '/auth/v1/admin/users/' + encodeURIComponent(found.id), {
@@ -407,8 +479,13 @@ function updateSupabaseUser_(body) {
     });
   }
 
-  logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + legacyId);
-  return json_({ ok: true, message: 'Data pengguna diperbarui.' });
+  logActivity_(actor, 'update', 'users', 'Memperbarui pengguna ' + legacyId
+    + (emailBerubah ? ' (email diubah)' : ''));
+  return json_({
+    ok: true,
+    message: 'Data pengguna diperbarui.',
+    emailDiubah: emailBerubah
+  });
 }
 
 /**

@@ -564,10 +564,19 @@
 
   <div class="modal fade" id="uploadPhotoModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="uploadPhotoForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Upload Foto</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><p class="text-secondary small mb-3">Upload foto ke album: <strong id="uploadAlbumName"></strong></p><div class="mb-3"><label class="form-label">Pilih Foto <span class="text-danger">*</span></label><input type="file" class="form-control" id="uploadPhotoFile" accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif" required multiple><div class="form-text">Format: SVG, PNG, JPG, WebP, GIF. Bisa pilih banyak file sekaligus.</div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveUploadButton" type="submit"><i class="bi bi-cloud-upload me-1"></i>Upload</button></div></form></div></div></div>
 
-  <div class="modal fade" id="userModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="userForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Tambah Pengguna</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="editUserId"><div class="row g-3"><div class="col-12"><label class="form-label">Nama Lengkap</label><input class="form-control" id="userName" required></div><div class="col-md-7"><label class="form-label">Email</label><input type="email" class="form-control" id="userEmail" required></div><div class="col-md-5"><label class="form-label">No HP</label><input type="tel" class="form-control" id="userPhone" inputmode="numeric"></div><div class="col-md-6"><label class="form-label">Role ID</label><select class="form-select" id="userRole"><option>Editor</option><option>Admin</option><option>Super Admin</option></select></div>
+  <div class="modal fade" id="userModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 rounded-4"><form id="userForm"><div class="modal-header border-0"><h5 class="modal-title fw-bold">Tambah Pengguna</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="hidden" id="editUserId"><div class="row g-3"><div class="col-12"><label class="form-label">Nama Lengkap</label><input class="form-control" id="userName" required></div><div class="col-md-7"><label class="form-label">Email</label><input type="email" class="form-control" id="userEmail" required><div class="form-text d-none" id="userEmailHint">Anda hanya dapat mengubah pengguna dengan peran Editor. Akun lain hanya bisa diubah Super Admin.</div></div><div class="col-md-5"><label class="form-label">No HP</label><input type="tel" class="form-control" id="userPhone" inputmode="numeric"></div><div class="col-md-6"><label class="form-label">Role ID</label><select class="form-select" id="userRole"><option>Editor</option><option>Admin</option><option>Super Admin</option></select></div>
 <div class="col-12 d-none" id="menuPermissionWrap">
-  <label class="form-label fw-bold">Akses Menu <span class="text-muted small">(centang menu untuk Editor)</span></label>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+    <label class="form-label fw-bold mb-0">Akses Menu</label>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge text-bg-light border" id="menuPermissionCount">0 menu</span>
+      <button type="button" class="btn btn-sm btn-light border py-0" id="menuPermissionAll">Pilih semua</button>
+      <button type="button" class="btn btn-sm btn-light border py-0" id="menuPermissionNone">Kosongkan</button>
+    </div>
+  </div>
+  <div class="form-text mt-0 mb-2" id="menuPermissionHelp">Centang menu yang boleh dibuka pengguna ini. Kotak yang sudah tercentang berarti menu itu sudah diberikan sebelumnya.</div>
   <div class="row g-2" id="menuPermissionCheckboxes"></div>
+  <div class="alert alert-warning d-none py-2 px-3 small mt-2 mb-0" id="menuPermissionNote"></div>
 </div><div class="col-md-6"><label class="form-label">Wilayah ID</label><input class="form-control" id="userArea" value="RW026" required></div><div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="userStatus"><option>Aktif</option><option>Nonaktif</option></select></div><div class="col-md-6"><label class="form-label" id="passwordLabel">Password Awal</label><input type="password" class="form-control" id="userPassword" minlength="8" required><div class="form-text d-none" id="passwordHint">Kosongkan jika password tidak diubah.</div></div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button><button class="btn btn-primary" id="saveUserButton" type="submit">Tambah User</button></div></form></div></div></div>
   <div class="modal fade" id="setPasswordModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered" style="max-width:520px"><div class="modal-content border-0 rounded-4"><form id="setPasswordForm">
     <div class="modal-header border-0 pb-0"><h5 class="modal-title fw-bold"><i class="bi bi-key-fill text-primary me-2"></i>Atur Password Pengguna</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -713,20 +722,96 @@
       if (kasCard) kasCard.classList.toggle('d-none', !menus.some(m => m.id === 'kas'));
     }
 
-    function renderMenuCheckboxes(selected) {
+    /**
+ * Daftar ceklis akses menu untuk form Tambah/Edit pengguna.
+ *
+ * `terpilih` adalah daftar menu yang SUDAH diberikan. Kotak yang tercentang
+ * karena tersimpan di database dibedakan dari yang tercentang karena `profil`
+ * selalu aktif - kalau tidak, Super Admin akan mengira "Profil Saya" adalah
+ * pilihan yang disengaja dan bisa ikut mencabutnya.
+ *
+ * Dikelompokkan mengikuti `group` di ALL_MENUS, karena daftarnya panjang
+ * dan tanpa kelompok orang harus memindai 14 baris untuk mencari satu menu.
+ *
+ * Menu 'users' disembunyikan: hanya Super Admin/Admin yang boleh membukanya,
+ * dan role itu memang tidak memakai daftar centang. Menu 'dashboard' juga,
+ * karena itu halaman landing - memblokirnya cuma mengarahkan orang ke layar
+ * kosong tanpa pesan.
+ */
+    function renderMenuCheckboxes(terpilih) {
       const container = document.getElementById('menuPermissionCheckboxes');
-      const menus = ALL_MENUS.filter(m => !ADMIN_ONLY_MENUS.includes(m.id) && m.id !== 'dashboard');
-      container.innerHTML = menus.map(m => {
-        const isProfile = m.id === 'profil';
-        const isChecked = isProfile || (selected||[]).includes(m.id);
-        return `<div class="col-6"><div class="form-check"><input class="form-check-input menu-checkbox" type="checkbox" id="menu_${m.id}" value="${m.id}" ${isChecked?'checked':''} ${isProfile?'disabled':''}><label class="form-check-label small" for="menu_${m.id}"><i class="bi ${m.icon} me-1"></i>${m.label}</label></div></div>`;
-      }).join('');
+      const daftar = ALL_MENUS.filter(m => !ADMIN_ONLY_MENUS.includes(m.id) && m.id !== 'dashboard');
+      const sudah = Array.isArray(terpilih) ? terpilih : [];
+
+      let html = '';
+      let grup = '';
+      daftar.forEach(m => {
+        if (m.group !== grup) {
+          grup = m.group;
+          html += '<div class="col-12"><div class="fw-bold text-secondary text-uppercase" style="font-size:.68rem;letter-spacing:.06em">' + esc(grup) + '</div></div>';
+        }
+        const wajib = m.id === 'profil';
+        html += '<div class="col-6 col-md-4">'
+          + '<div class="form-check">'
+          + '<input class="form-check-input menu-checkbox" type="checkbox" id="menu_' + m.id + '" value="' + m.id + '"'
+          + (wajib || sudah.includes(m.id) ? ' checked' : '')
+          + (wajib ? ' disabled data-wajib="1"' : '') + '>'
+          + '<label class="form-check-label small" for="menu_' + m.id + '"' + (wajib ? ' title="Selalu tersedia untuk semua pengguna"' : '') + '>'
+          + '<i class="bi ' + m.icon + ' me-1"></i>' + esc(m.label)
+          + (wajib ? ' <span class="text-secondary">(wajib)</span>' : '')
+          + '</label></div></div>';
+      });
+      container.innerHTML = html;
+      hitungMenuTerpilih();
     }
 
+    /** Jumlah menu yang dicentang, dipakai di badge penghitung. */
+    function hitungMenuTerpilih() {
+      const n = document.querySelectorAll('#menuPermissionCheckboxes .menu-checkbox:checked').length;
+      const el = document.getElementById('menuPermissionCount');
+      if (el) el.textContent = n + ' menu dipilih';
+    }
+
+    /**
+     * Untuk role Admin dan Super Admin, daftar centang tidak berlaku: mereka
+     * sudah punya semua menu, dan menu_access di database memang kosong untuk
+     * keduanya (lihat Code.gs createSupabaseUser_/updateSupabaseUser_).
+     *
+     * Kalau bagian ini disembunyikan begitu saja, Super Admin tidak punya
+     * cara untuk tahu apa yang sebenarnya dikonfigurasi. Kalau centangnya
+     * ditampilkan kosong, justru sebaliknya - terlihat seperti akses dicabut.
+     * Jadi ditampilkan sebagai keterangan, bukan pilihan.
+     */
     function toggleMenuPermission() {
       const wrap = document.getElementById('menuPermissionWrap');
       const role = document.getElementById('userRole').value;
-      wrap.classList.toggle('d-none', role !== 'Editor');
+      const isEditor = role === 'Editor';
+      wrap.classList.toggle('d-none', false);
+
+      const help = document.getElementById('menuPermissionHelp');
+      const note = document.getElementById('menuPermissionNote');
+      const semuaBtn = document.getElementById('menuPermissionAll');
+      const noneBtn = document.getElementById('menuPermissionNone');
+      const count = document.getElementById('menuPermissionCount');
+
+      if (isEditor) {
+        help.classList.remove('d-none');
+        help.textContent = 'Centang menu yang boleh dibuka pengguna ini. Kotak yang sudah tercentang berarti menu itu sudah diberikan sebelumnya.';
+        note.classList.add('d-none');
+        semuaBtn.classList.remove('d-none');
+        noneBtn.classList.remove('d-none');
+        count.classList.remove('d-none');
+        hitungMenuTerpilih();
+      } else {
+        help.classList.add('d-none');
+        semuaBtn.classList.add('d-none');
+        noneBtn.classList.add('d-none');
+        count.classList.add('d-none');
+        note.classList.remove('d-none');
+        note.textContent = role === 'Super Admin'
+          ? 'Peran Super Admin selalu punya akses ke semua menu - daftar centang tidak dipakai untuk role ini.'
+          : 'Peran Admin punya akses ke semua menu kecuali Monitoring Pengunjung - daftar centang tidak dipakai untuk role ini.';
+      }
     }
 
     const badgeClass = cat => { const k = String(cat||'').trim().toLowerCase(); return ({kegiatan:'badge-soft-warning',informasi:'badge-soft-success',kesehatan:'badge-soft-danger',keamanan:'badge-soft-danger',lingkungan:'badge-soft-success',ekonomi:'badge-soft-warning'}[k] || 'text-bg-light'); };
@@ -818,7 +903,10 @@
       const isSuperAdmin = actorRole === 'Super Admin';
       document.getElementById('userTable').innerHTML = users.length?users.map(u=>{
         const active=u.status==='Aktif';
-        const canEdit = actorRole === 'Super Admin' || u.role !== 'Super Admin';
+        // Mengikuti aturan Code.gs: Super Admin mengelola semua, Admin hanya
+        // mengelola akun Editor. Kalau UI tidak ikut aturan yang sama, Admin
+        // akan melihat tombol yang pasti ditolak server.
+        const canEdit = isSuperAdmin || (actorRole === 'Admin' && u.role === 'Editor');
         return `<tr><td class="fw-semibold text-nowrap">${esc(u.userId)}</td><td><div class="d-flex align-items-center gap-2"><div class="avatar" style="width:34px;height:34px;font-size:.75rem">${esc(u.nama.split(' ').map(x=>x[0]).slice(0,2).join(''))}</div><div><div class="fw-semibold small">${esc(u.nama)}</div><small class="text-secondary">${esc(u.wilayah)}</small></div></div></td><td class="text-nowrap small">${u.email?esc(u.email):'<span class="text-secondary">-</span>'}</td><td class="text-nowrap">${esc(u.noHp||'-')}</td><td><span class="badge text-bg-light border text-nowrap">${esc(u.role)}</span></td><td style="min-width:200px">${renderMenuAccess(u)}</td><td><span class="badge ${active?'badge-soft-success':'badge-soft-danger'}">${esc(u.status)}</span></td><td class="small text-secondary text-nowrap">${esc(u.loginTerakhir)}</td><td class="small text-secondary text-nowrap">${esc(u.tanggalDibuat)}</td><td class="text-end text-nowrap">${canEdit?`<button class="btn btn-sm btn-light border" onclick="editUser('${esc(u.userId)}')" title="Edit"><i class="bi bi-pencil"></i></button>`:''} ${isSuperAdmin?`<button class="btn btn-sm btn-light border text-primary" onclick="openSetPassword('${esc(u.userId)}')" title="Atur Password"><i class="bi bi-key"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border" onclick="toggleUser('${esc(u.userId)}')" title="${active?'Nonaktifkan':'Aktifkan'}"><i class="bi bi-${active?'pause':'play'}"></i></button>`:''} ${canEdit?`<button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${esc(u.userId)}')" title="Hapus"><i class="bi bi-trash"></i></button>`:''}</td></tr>`}).join(''):'<tr><td colspan="10" class="text-center text-secondary py-5">Belum ada data pengguna.</td></tr>';
     }
     /**
@@ -1474,7 +1562,22 @@ let kasData = [];
 document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e.target.value;if(v){document.getElementById('entryDescription').focus();document.execCommand('fontSize',false,v);}e.target.value='';});
     document.getElementById('entryForm').onsubmit=async e=>{e.preventDefault();const type=document.getElementById('entryType').value,id=document.getElementById('entryId').value,button=document.getElementById('saveEntryButton'),file=document.getElementById('entryPhoto').files[0];button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';try{let dataUrl='',fileName='';if(file){dataUrl=await fileToDataUrl(file);fileName=file.name;}const title=document.getElementById('entryTitle').value.trim(),desc=cleanRichText(document.getElementById('entryDescription').innerHTML),tanggal=fromInputDate(document.getElementById('entryDate').value),status=document.getElementById('entryStatus').value,category=document.getElementById('entryCategory').value,foto=document.getElementById('entryExistingPhoto').value;if(type==='Pengumuman'){await apiRequest(id?'updateAnnouncement':'createAnnouncement',{announcement:{id,judul:title,kategori:category,ringkasan:desc,tanggal,status}});await loadAnnouncements();}else if(type==='Berita'){await apiRequest(id?'updateNews':'createNews',{news:{id,judul:title,category,isi:desc,tanggal,status,foto,fileName,dataUrl}});await loadNews();}else if(type==='Fasilitas'){await apiRequest(id?'updateFacility':'createFacility',{facility:{id,nama:title,deskripsi:plainText(desc),foto,maps:document.getElementById('entryMaps').value.trim(),fileName,dataUrl}});await loadFacilities();}else{await apiRequest(id?'updateOrgMember':'createOrgMember',{member:{id,group:document.getElementById('entryOrgGroup').value,nama:title,jabatan:plainText(desc),foto,fileName,dataUrl}});activeOrgGroup=document.getElementById('entryOrgGroup').value;await loadOrganization();}bootstrap.Modal.getInstance('#entryModal').hide();document.getElementById('toastMessage').textContent=type+' berhasil disimpan.';toast();}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent=id?'Simpan Perubahan':'Simpan Data';}};
     document.getElementById('himbauanForm').onsubmit=async e=>{e.preventDefault();const file=document.getElementById('himbauanFile').files[0],button=document.getElementById('saveHimbauanButton');if(!file)return;button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Mengupload';try{const dataUrl=await fileToDataUrl(file);await apiRequest('createHimbauan',{himbauan:{judul:document.getElementById('himbauanTitle').value.trim(),kategori:document.getElementById('himbauanCategory').value,status:document.getElementById('himbauanStatus').value,fileName:file.name,dataUrl}});bootstrap.Modal.getInstance('#himbauanModal').hide();e.target.reset();document.getElementById('toastMessage').textContent='Gambar himbauan berhasil disimpan ke Drive dan database.';toast();await loadHimbauan();}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent='Upload & Simpan';}};
-    document.getElementById('userForm').onsubmit=async e=>{e.preventDefault();const button=document.getElementById('saveUserButton'),userId=document.getElementById('editUserId').value,isEdit=Boolean(userId);button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';const role=document.getElementById('userRole').value;let menuAkses=[];if(role==='Editor'){document.querySelectorAll('.menu-checkbox:checked').forEach(cb=>menuAkses.push(cb.value));}const user={userId,nama:document.getElementById('userName').value.trim(),email:document.getElementById('userEmail').value.trim(),noHp:document.getElementById('userPhone').value.trim(),role,wilayah:document.getElementById('userArea').value.trim(),status:document.getElementById('userStatus').value,password:document.getElementById('userPassword').value,menuAkses};try{await apiRequest(isEdit?'updateUser':'createUser',{user});bootstrap.Modal.getInstance('#userModal').hide();resetUserForm();document.getElementById('toastMessage').textContent=isEdit?'Pengguna berhasil diperbarui.':'Pengguna berhasil ditambahkan ke database.';toast();await loadUsers();}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent=isEdit?'Simpan Perubahan':'Tambah User';}};
+    document.getElementById('userForm').onsubmit=async e=>{e.preventDefault();const button=document.getElementById('saveUserButton'),userId=document.getElementById('editUserId').value,isEdit=Boolean(userId);button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan';const role=document.getElementById('userRole').value;let menuAkses=[];if(role==='Editor'){document.querySelectorAll('#menuPermissionCheckboxes .menu-checkbox:checked').forEach(cb=>menuAkses.push(cb.value));}const user={userId,nama:document.getElementById('userName').value.trim(),email:document.getElementById('userEmail').value.trim(),noHp:document.getElementById('userPhone').value.trim(),role,wilayah:document.getElementById('userArea').value.trim(),status:document.getElementById('userStatus').value,password:document.getElementById('userPassword').value,menuAkses};let hasil=null;
+      try{hasil=await apiRequest(isEdit?'updateUser':'createUser',{user});bootstrap.Modal.getInstance('#userModal').hide();resetUserForm();
+      // Pesan disusun dari apa yang server KONFIRMASIKAN berubah, bukan dari
+      // apa yang diketik di form.
+      //
+      // Server mengembalikan emailDiubah karena email hanya tersimpan kalau
+      // benar-benar berbeda - dan email adalah identitas login. Kalau pesan
+      // selalu menyebut email, "Data pengguna diperbarui" akan dibaca sebagai
+      // "semua yang saya ketik sudah tersimpan", padahal tidak.
+      const bagian=[];
+      bagian.push('Data pengguna diperbarui.');
+      if(isEdit&&hasil&&hasil.emailDiubah)bagian.push('Email diganti ke '+user.email+'.');
+      if(user.password)bagian.push('Password baru disimpan.');
+      if(isEdit&&user.role==='Editor')bagian.push('Akses menu: '+menuAkses.length+' menu.');
+      document.getElementById('toastMessage').textContent=isEdit?bagian.join(' '):'Pengguna berhasil ditambahkan ke database.';
+      toast();await segarkan(loadUsers);}catch(err){alert(err.message);}finally{button.disabled=false;button.textContent=isEdit?'Simpan Perubahan':'Tambah User';}};
     window.editAnnouncement=id=>{const item=announcements.find(x=>x.id===id);if(item){configureEntryModal('Pengumuman',item);bootstrap.Modal.getOrCreateInstance('#entryModal').show();}};
     window.toggleAnnouncement=async id=>{try{await apiRequest('toggleAnnouncement',{id});await loadAnnouncements();document.getElementById('toastMessage').textContent='Status pengumuman diperbarui.';toast();}catch(err){alert(err.message);}};
     window.deleteAnnouncement=async id=>{if(!confirm(`Hapus pengumuman ${id}?`))return;try{await apiRequest('deleteAnnouncement',{id});await loadAnnouncements();document.getElementById('toastMessage').textContent='Pengumuman berhasil dihapus.';toast();}catch(err){alert(err.message);}};
@@ -1486,7 +1589,15 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     window.editOrgMember=(group,id)=>{const item=(organization[group]||[]).find(x=>x.id===id);if(item){configureEntryModal('Organisasi',item);bootstrap.Modal.getOrCreateInstance('#entryModal').show();}};
     window.deleteOrgMember=async(group,id)=>{if(!confirm(`Hapus pengurus ${id}?`))return;try{await apiRequest('deleteOrgMember',{group,id});await loadOrganization();document.getElementById('toastMessage').textContent='Pengurus berhasil dihapus.';toast();}catch(err){alert(err.message);}};
     window.toggleUser=async userId=>{try{await apiRequest('toggleUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Status pengguna diperbarui.';toast();}catch(err){alert(err.message);}};
-    window.editUser=userId=>{const u=users.find(item=>item.userId===userId);if(!u)return;document.getElementById('editUserId').value=u.userId;document.getElementById('userName').value=u.nama;document.getElementById('userEmail').value=u.email;document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';const menuAkses=JSON.parse(u.menuAkses||'[]');renderMenuCheckboxes(menuAkses);toggleMenuPermission();bootstrap.Modal.getOrCreateInstance('#userModal').show();};
+    window.editUser=userId=>{const u=users.find(item=>item.userId===userId);if(!u)return;document.getElementById('editUserId').value=u.userId;document.getElementById('userName').value=u.nama;document.getElementById('userEmail').value=u.email;
+//  Admin boleh mengubah APAPUN pada akun Editor, tapi tidak boleh menyentuh
+      //  akun Admin lain maupun akun Super Admin. Field-nya dikunci di sisi ini
+      //  supaya tidak ada yang diketik lalu ditolak server - dan supaya alasannya
+      //  terlihat langsung, bukan baru muncul setelah menekan Simpan.
+      const bolehUbahEmail = isSuperAdmin || (actorRole === 'Admin' && u.role === 'Editor');
+      document.getElementById('userEmail').readOnly=!bolehUbahEmail;
+      document.getElementById('userEmailHint').classList.toggle('d-none',bolehUbahEmail);
+      document.getElementById('userEmail').title=bolehUbahEmail?'':'Anda hanya dapat mengubah pengguna dengan peran Editor. Akun ini berperan '+u.role+'.';document.getElementById('userPhone').value=u.noHp||'';document.getElementById('userRole').value=u.role;document.getElementById('userArea').value=u.wilayah;document.getElementById('userStatus').value=u.status;document.getElementById('userPassword').required=false;document.getElementById('passwordLabel').textContent='Password Baru';document.getElementById('passwordHint').classList.remove('d-none');document.querySelector('#userModal .modal-title').textContent='Edit Pengguna '+u.userId;document.getElementById('saveUserButton').textContent='Simpan Perubahan';const menuAkses=(()=>{try{const p=JSON.parse(u.menuAkses||'[]');return Array.isArray(p)?p:[];}catch(_){return[];}})();renderMenuCheckboxes(menuAkses);toggleMenuPermission();bootstrap.Modal.getOrCreateInstance('#userModal').show();};
     window.deleteUser=async userId=>{if(!confirm(`Hapus pengguna ${userId} dari database?`))return;try{await apiRequest('deleteUser',{userId});await loadUsers();document.getElementById('toastMessage').textContent='Pengguna berhasil dihapus.';toast();}catch(err){alert(err.message);}};
 
     /**
@@ -1608,10 +1719,43 @@ document.getElementById('entryFontSize').addEventListener('change',e=>{const v=e
     window.navigate=navigate;
     window.loadVisitor=loadVisitor;
     window.vGo=vGo;
-    function resetUserForm(){const form=document.getElementById('userForm');form.reset();document.getElementById('editUserId').value='';document.getElementById('userArea').value='RW026';document.getElementById('userPassword').required=true;document.getElementById('passwordLabel').textContent='Password Awal';document.getElementById('passwordHint').classList.add('d-none');document.querySelector('#userModal .modal-title').textContent='Tambah Pengguna';document.getElementById('saveUserButton').textContent='Tambah User';toggleMenuPermission();renderMenuCheckboxes([]);document.getElementById('userRole').value='Editor';const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');}
-    document.getElementById('userModal').addEventListener('show.bs.modal',()=>{const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');toggleMenuPermission();renderMenuCheckboxes([]);});
+    function resetUserForm(){const form=document.getElementById('userForm');form.reset();document.getElementById('editUserId').value='';document.getElementById('userArea').value='RW026';
+      // Buka lagi kunci email. Kalau tidak, sesi Admin yang sempat meng-edit
+      // pengguna akan membuka form Tambah dengan email terkunci - dan user baru
+      // jadi tidak bisa dibuat karena email wajib diisi.
+      document.getElementById('userEmail').readOnly=false;
+      document.getElementById('userEmail').title='';
+      document.getElementById('userEmailHint').classList.add('d-none');
+      document.getElementById('userPassword').required=true;document.getElementById('passwordLabel').textContent='Password Awal';document.getElementById('passwordHint').classList.add('d-none');document.querySelector('#userModal .modal-title').textContent='Tambah Pengguna';document.getElementById('saveUserButton').textContent='Tambah User';toggleMenuPermission();renderMenuCheckboxes([]);document.getElementById('userRole').value='Editor';const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');}
+    document.getElementById('userModal').addEventListener('show.bs.modal',()=>{const isSuper=session?.user?.role==='Super Admin';document.querySelectorAll('#userRole option').forEach(o=>o.style.display=o.value==='Super Admin'?(isSuper?'':'none'):'');
+      // Hanya kosongkan kalau ini memang Form TAMBAH.
+      //
+      // Dulu handler ini memanggil renderMenuCheckboxes([]) tanpa syarat, dan
+      // itu menimpa apa pun yang sudah dirender editUser. Urutannya: editUser
+      // mengisi centang dari menu_access -> .show() -> Bootstrap menembakkan
+      // show.bs.modal -> daftar dikosongkan. Akibatnya admin membuka Edit untuk
+      // Editor dan melihat semua kotak kosong, lalu menyimpulkan tidak ada menu
+      // yang diberikan - padahal mencentangnya lagi akan menimpa data lama.
+      //
+      // editUserId sudah diisi editUser sebelum .show() dipanggil, jadi
+      // membedakan kedua kasus tanpa perlu flag tambahan.
+      if(document.getElementById('editUserId').value) return;
+      // Form Tambah: email wajib bisa diketik siapa pun, termasuk Admin yang
+      // tadi menguncinya saat meng-edit pengguna.
+      document.getElementById('userEmail').readOnly=false;
+      document.getElementById('userEmail').title='';
+      document.getElementById('userEmailHint').classList.add('d-none');
+      toggleMenuPermission();renderMenuCheckboxes([]);});
     document.getElementById('userModal').addEventListener('hidden.bs.modal',resetUserForm);
     document.getElementById('userRole').addEventListener('change',toggleMenuPermission);
+    // Pemilih "Pilih semua" dan "Kosongkan" sengaja TIDAK memakai
+    // renderMenuCheckboxes, karena itu akan menimpa centang wajib 'profil'.
+    document.getElementById('menuPermissionAll').onclick=()=>{document.querySelectorAll('#menuPermissionCheckboxes .menu-checkbox').forEach(cb=>{if(!cb.dataset.wajib)cb.checked=true;});hitungMenuTerpilih();};
+    document.getElementById('menuPermissionNone').onclick=()=>{document.querySelectorAll('#menuPermissionCheckboxes .menu-checkbox').forEach(cb=>{if(!cb.dataset.wajib)cb.checked=false;});hitungMenuTerpilih();};
+    // Delegasi dari wadah, bukan dari tiap kotak: kotak dibuat ulang setiap
+    // kali renderMenuCheckboxes dipanggil, jadi listener per-kotak akan
+    // menumpuk setiap kali form dibuka.
+    document.getElementById('menuPermissionCheckboxes').addEventListener('change',hitungMenuTerpilih);
     // Sesi disimpan oleh Supabase Auth, bukan di localStorage.
     //
     // PENTING: signOut() WAJIB dipanggil setiap kali keluar. Kalau tidak,
